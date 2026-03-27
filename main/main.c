@@ -13,6 +13,20 @@
 #define TASK_CORE_NC 0
 #define TASK_CORE_C 1
 
+//dataDictionary constants
+//aslo add a range for assuming there's someting wrong with the sensor
+#define EXTERNAL_TEMPURATURE_MAX 22.2
+#define EXTERNAL_TEMPURATURE_MIN 20
+
+#define INTERNAL_TEMPURATURE_MAX 37.5
+#define INTERNAL_TEMPURATURE_MIN 36
+
+//not sure what these will look like yet
+#define CO2_LEVEL_MAX 1
+#define HUMIDITY_MAX 0.55
+#define HEARTBEAT_MIN 1
+#define HEARTBEAT_MAX 1
+
 //data variables and semiphores
 static volatile int tempurature;
 static SemaphoreHandle_t temputatureLock;
@@ -51,6 +65,18 @@ void brightnessMonitorNC( void *pvParameters )
 {
     for( ;; )
     {
+		float tempTempurature=0;
+		for(int i=0;i<3;i++){
+			//read tempurature
+			//add to tempTempurature
+		}
+		tempTempurature=tempTempurature/3;
+		//convert from k to c maybe
+		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
+			
+		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
+			
+		}
 		tempurature=10;
 		xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
@@ -139,6 +165,17 @@ void alarmControllerC(void *pvParameter){
 	vTaskDelete( NULL );
 }
 
+void appControllerNC(void *pvParameter){
+
+	for( ;; )
+	{
+		tempurature=10;
+		xSemaphoreGive(temputatureLock);
+		vTaskDelay(10000);
+	}
+	vTaskDelete( NULL );
+}
+
 void app_main(void)
 {
 	temputatureLock = xSemaphoreCreateMutex();
@@ -155,6 +192,12 @@ void app_main(void)
 	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
 	
+	xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(ledControllerC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(alarmControllerC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+		
 	while (true) {
         printf("Hello from app_main!\n");
         sleep(1);
