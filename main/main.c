@@ -5,6 +5,24 @@
 #include <unistd.h>
 
 
+#define NUM_TASKS 11
+
+typedef enum {
+    ETEMPURATURE = 0,
+    ITEMPURATURE,
+    BRIGHTNESS,
+    HEARTBEAT,
+    CO2,
+    HUMIDITY,
+    LED_NC,
+    LED_C,
+    LCD,
+    ALARM,
+    APP
+} SystemIds;
+
+const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT, CO2, ITEMPURATURE, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
+
 //NOTE 0 IS THE LOWEST PRIORITY
 //priorities of tasks
 #define TASK_PRIO_NC_MONITOR 1
@@ -48,19 +66,24 @@ static SemaphoreHandle_t humidityLock;
 static volatile int motion;
 static SemaphoreHandle_t motionLock;
 
-//error handling varaibles
-static volatile int errFlag;
+//error handling variables
+//errFlagSignal is a queue in case multiple systems fail simultaneously
 static SemaphoreHandle_t errFlagSignal;
-static volatile int errType;
-static volatile int errLocation;
-//1. Etempurature 2. ITempurature 3. 
+static volatile int errType[11];
+//-1 undefined, 1 impossible reading
 
-static SemaphoreHandle_t recoverySignalNC;
-static SemaphoreHandle_t recoverySignalC;
+
+static SemaphoreHandle_t recoverySignal[NUM_TASKS];
 //this is a more critical version, task stays using the cpu even when blocked
 //static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
+void waitRecoveryNC(int i){
+	xSemaphoreTake(recoverySignal[i], portMAX_DELAY);
+}
 
+void waitRecoveryC(int i){
+	xSemaphoreTake(recoverySignal[i], portMAX_DELAY);
+}
 
 //Monitoring tasks
 void eTempratureMonitorNC( void *pvParameters )
@@ -77,9 +100,8 @@ void eTempratureMonitorNC( void *pvParameters )
 				i--;
 				errCount++;
 				if(errCount>3){
-					errFlag=1;
-					errType=2;
-					errLocation=2;
+					xSemaphoreGive(errFlagSignal);
+					errType[0]=1;
 					tempTempurature=300;
 					break;
 				}	
@@ -87,7 +109,7 @@ void eTempratureMonitorNC( void *pvParameters )
 			//add to tempTempurature
 		}
 		if(tempTempurature==300){
-			xSemaphoreTake(recoverySignalNC, portMAX_DELAY);
+			waitRecoveryNC(0);
 		}
 		
 		tempTempurature=tempTempurature/3;		
@@ -101,7 +123,7 @@ void eTempratureMonitorNC( void *pvParameters )
     vTaskDelete( NULL );
 }
 
-void iTempratureMonitorNC( void *pvParameters )
+void iTempratureMonitorC( void *pvParameters )
 {
 	int errCount=0;
     for( ;; )
@@ -115,16 +137,16 @@ void iTempratureMonitorNC( void *pvParameters )
 				i--;
 				errCount++;
 				if(errCount>3){
-					errFlag=1;
-					errType=2;
-					errLocation=2;
+					xSemaphoreGive(errFlagSignal);
+					errType[1]=1;
 					tempTempurature=300;
 					break;
 				}	
 			}
 			//add to tempTempurature
 		}
-		if(tempTempurature==300){			
+		if(tempTempurature==300){	
+			waitRecoveryC(1)	;	
 		}
 		
 		tempTempurature=tempTempurature/3;		
@@ -144,8 +166,8 @@ void brightnessMonitorNC( void *pvParameters )
     for( ;; )
     {
 		
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		brightness=10;
+		xSemaphoreGive(brightnessLock);
 		vTaskDelay(10000);
     }
     vTaskDelete( NULL );
@@ -156,8 +178,8 @@ void heartbeatMonitorC( void *pvParameters )
 {
     for( ;; )
     {
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		heartbeat=10;
+		xSemaphoreGive(heartbeatLock);
 		vTaskDelay(10000);
     }
     vTaskDelete( NULL );
@@ -167,8 +189,8 @@ void CO2MonitorC( void *pvParameters )
 {
     for( ;; )
     {
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		CO2Level=10;
+		xSemaphoreGive(CO2LevelLock);
 		vTaskDelay(10000);
     }
     vTaskDelete( NULL );
@@ -178,8 +200,8 @@ void humidityMonitorNC( void *pvParameters )
 {
     for( ;; )
     {
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		humidity=10;
+		xSemaphoreGive(humidityLock);
 		vTaskDelay(10000);
     }
     vTaskDelete( NULL );
@@ -244,10 +266,20 @@ void appControllerNC(void *pvParameter){
 }
 
 void errHandlerC(void *pvParameter){
-	int []
+	int locations[]={0,0,0,0,0,0,0,0,0,0,0};
+	
 	for(;;){
 		xSemaphoreTake(errFlagSignal, portMAX_DELAY);
-		
+		for (int i=0; i<NUM_TASKS; i++) {
+			if(errType[tasksInPriorityOrder[i]]>0){
+				locations[tasksInPriorityOrder[i]]++;
+				//setup a delay to decrement it
+				if(locations[tasksInPriorityOrder[i]]>=3){
+					//do something when it fails three times within a certain time frame
+				}
+				xSemaphoreGive(recoverySignal[tasksInPriorityOrder[i]]);
+			}
+		}	
 	}
 	vTaskDelete( NULL );
 }
@@ -261,7 +293,12 @@ void app_main(void)
 	CO2LevelLock = xSemaphoreCreateMutex();
 	humidityLock = xSemaphoreCreateMutex();
 	motionLock = xSemaphoreCreateMutex();
-	errFlagSignal = xSemaphoreCreateMutex();	
+	errFlagSignal = xSemaphoreCreateCounting(11,0);	
+	recoverySignalC = xSemaphoreCreateCounting(10, 0); 
+	recoverySignalNC = xSemaphoreCreateCounting(10, 0);
+	for (int i = 0; i < NUM_TASKS; i++){
+		semaphores[i] = xSemaphoreCreateBinary();
+	} 
 	
 	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
