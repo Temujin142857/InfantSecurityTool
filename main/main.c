@@ -1,4 +1,5 @@
 #include "freertos/idf_additions.h"
+#include "portmacro.h"
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
@@ -14,12 +15,15 @@
 #define TASK_CORE_C 1
 
 //dataDictionary constants
-//aslo add a range for assuming there's someting wrong with the sensor
 #define EXTERNAL_TEMPURATURE_MAX 22.2
 #define EXTERNAL_TEMPURATURE_MIN 20
+#define EXTERNAL_TEMPURATURE_CIEL 50
+#define EXTERNAL_TEMPUTATURE_FLOOR -40
 
 #define INTERNAL_TEMPURATURE_MAX 37.5
 #define INTERNAL_TEMPURATURE_MIN 36
+#define INTERNAL_TEMPURATURE_CIEL 50
+#define INTERNAL_TEMPURATURE_FLOOR 20
 
 //not sure what these will look like yet
 #define CO2_LEVEL_MAX 1
@@ -28,8 +32,10 @@
 #define HEARTBEAT_MAX 1
 
 //data variables and semiphores
-static volatile int tempurature;
-static SemaphoreHandle_t temputatureLock;
+static volatile int eTempurature;
+static SemaphoreHandle_t eTemputatureLock;
+static volatile int iTempurature;
+static SemaphoreHandle_t iTemputatureLock;
 static volatile int brightness;
 static SemaphoreHandle_t brightnessLock;
 static volatile int heartbeat;
@@ -42,19 +48,91 @@ static SemaphoreHandle_t humidityLock;
 static volatile int motion;
 static SemaphoreHandle_t motionLock;
 
+//error handling varaibles
+static volatile int errFlag;
+static SemaphoreHandle_t errFlagSignal;
+static volatile int errType;
+static volatile int errLocation;
+//1. Etempurature 2. ITempurature 3. 
 
+static SemaphoreHandle_t recoverySignalNC;
+static SemaphoreHandle_t recoverySignalC;
 //this is a more critical version, task stays using the cpu even when blocked
 //static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 
 
 //Monitoring tasks
-void tempratureMonitorNC( void *pvParameters )
+void eTempratureMonitorNC( void *pvParameters )
 {
+	int errCount=0;
     for( ;; )
     {
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		float tempTempurature=0;
+		for(int i=0;i<3;i++){
+			//read tempurature
+			//convert from k to c maybe
+			float t=0;
+			if(t<EXTERNAL_TEMPUTATURE_FLOOR||t>EXTERNAL_TEMPURATURE_CIEL){
+				i--;
+				errCount++;
+				if(errCount>3){
+					errFlag=1;
+					errType=2;
+					errLocation=2;
+					tempTempurature=300;
+					break;
+				}	
+			}
+			//add to tempTempurature
+		}
+		if(tempTempurature==300){
+			xSemaphoreTake(recoverySignalNC, portMAX_DELAY);
+		}
+		
+		tempTempurature=tempTempurature/3;		
+		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
+		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
+		}
+		eTempurature=tempTempurature;
+		xSemaphoreGive(eTemputatureLock);
+		vTaskDelay(10000);
+    }
+    vTaskDelete( NULL );
+}
+
+void iTempratureMonitorNC( void *pvParameters )
+{
+	int errCount=0;
+    for( ;; )
+    {
+		float tempTempurature=0;
+		for(int i=0;i<3;i++){
+			//read tempurature
+			//convert from k to c maybe
+			float t=0;
+			if(t<INTERNAL_TEMPURATURE_FLOOR||t>INTERNAL_TEMPURATURE_CIEL){
+				i--;
+				errCount++;
+				if(errCount>3){
+					errFlag=1;
+					errType=2;
+					errLocation=2;
+					tempTempurature=300;
+					break;
+				}	
+			}
+			//add to tempTempurature
+		}
+		if(tempTempurature==300){			
+		}
+		
+		tempTempurature=tempTempurature/3;		
+		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
+		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
+		}
+		iTempurature=tempTempurature;
+		xSemaphoreGive(iTemputatureLock);
 		vTaskDelay(10000);
     }
     vTaskDelete( NULL );
@@ -65,18 +143,7 @@ void brightnessMonitorNC( void *pvParameters )
 {
     for( ;; )
     {
-		float tempTempurature=0;
-		for(int i=0;i<3;i++){
-			//read tempurature
-			//add to tempTempurature
-		}
-		tempTempurature=tempTempurature/3;
-		//convert from k to c maybe
-		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
-			
-		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
-			
-		}
+		
 		tempurature=10;
 		xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
@@ -176,17 +243,28 @@ void appControllerNC(void *pvParameter){
 	vTaskDelete( NULL );
 }
 
+void errHandlerC(void *pvParameter){
+	int []
+	for(;;){
+		xSemaphoreTake(errFlagSignal, portMAX_DELAY);
+		
+	}
+	vTaskDelete( NULL );
+}
+
 void app_main(void)
 {
-	temputatureLock = xSemaphoreCreateMutex();
+	eTemputatureLock = xSemaphoreCreateMutex();
+	iTemputatureLock = xSemaphoreCreateMutex();
 	brightnessLock = xSemaphoreCreateMutex();
 	heartbeatLock = xSemaphoreCreateMutex();
 	CO2LevelLock = xSemaphoreCreateMutex();
 	humidityLock = xSemaphoreCreateMutex();
 	motionLock = xSemaphoreCreateMutex();
+	errFlagSignal = xSemaphoreCreateMutex();	
 	
-	
-	xTaskCreatePinnedToCore(tempratureMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
