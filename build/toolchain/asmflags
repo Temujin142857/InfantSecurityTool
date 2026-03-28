@@ -1,5 +1,4 @@
--mlongcalls
--fno-builtin-memcpy
--fno-builtin-memset
--fno-builtin-bzero
+-mabi=ilp32f
+-march=rv32imafc_zicsr_zifencei_zaamo_zalrsc_xesploop_xespv
+-mtune=esp-base
 -specs=picolibc.specs

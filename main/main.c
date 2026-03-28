@@ -1,3 +1,4 @@
+#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "portmacro.h"
 #include <stdio.h>
@@ -5,7 +6,8 @@
 #include <unistd.h>
 
 
-#define NUM_TASKS 11
+#define NUM_TASKS 13
+#define NUM_MONITORS 6
 
 typedef enum {
     ETEMPURATURE = 0,
@@ -18,15 +20,29 @@ typedef enum {
     LED_C,
     LCD,
     ALARM,
-    APP
-} SystemIds;
+    APP,
+	ERRHANDLER,
+	ERRDECREMENTER,
+} TaskIds;
 
-const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT, CO2, ITEMPURATURE, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
+typedef enum {    
+    BRIGHTNESS_P=1,    
+    HUMIDITY_P,
+    LED_NC_P,
+   	LCD_P, 
+   	ETEMPURATURE_P,  
+    APP_P,
+   	ERRDECREMENTER_P,
+	ERRHANDLER_P,
+	ITEMPURATURE_P,
+	CO2_P,
+	HEARTBEAT_P,	
+	LED_C_P,	   
+	ALARM_P,
+} TaskPrioroties;
 
-//NOTE 0 IS THE LOWEST PRIORITY
-//priorities of tasks
-#define TASK_PRIO_NC_MONITOR 1
-#define TASK_PRIO_C_MONITOR 2
+const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT, CO2, ITEMPURATURE, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000};
 
 //Which core to pin the tasks to
 #define TASK_CORE_NC 0
@@ -50,9 +66,9 @@ const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT, CO2, ITEMPUR
 #define HEARTBEAT_MAX 1
 
 //data variables and semiphores
-static volatile int eTempurature;
+static volatile float eTempurature;
 static SemaphoreHandle_t eTemputatureLock;
-static volatile int iTempurature;
+static volatile float iTempurature;
 static SemaphoreHandle_t iTemputatureLock;
 static volatile int brightness;
 static SemaphoreHandle_t brightnessLock;
@@ -69,49 +85,88 @@ static SemaphoreHandle_t motionLock;
 //error handling variables
 //errFlagSignal is a queue in case multiple systems fail simultaneously
 static SemaphoreHandle_t errFlagSignal;
-static volatile int errType[11];
+static volatile uint8_t errType[11];
+static uint8_t errLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
+
+static QueueHandle_t errToDecrementQueue;
+StaticQueue_t errToDecrementQueueBuffer;
+uint8_t errQueueStorage[sizeof(uint8_t) * 33];
 //-1 undefined, 1 impossible reading
 
 
-static SemaphoreHandle_t recoverySignal[NUM_TASKS];
+static SemaphoreHandle_t recoverySignals[NUM_TASKS];
 //this is a more critical version, task stays using the cpu even when blocked
 //static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
-void waitRecoveryNC(int i){
-	xSemaphoreTake(recoverySignal[i], portMAX_DELAY);
+void panic(){
+	//something that shouldn't be possible happened
 }
 
-void waitRecoveryC(int i){
-	xSemaphoreTake(recoverySignal[i], portMAX_DELAY);
+void errDecrementerNC(void *pvParameter){
+	uint8_t taskNum;	
+	xQueueReceive(errToDecrementQueue, &taskNum, portMAX_DELAY);
+	vTaskDelay(delayInMillisecondsForMonitorTasks[taskNum]);
+	errLocationTracker[taskNum]--;
+	if(errLocationTracker[taskNum]<0){
+		errLocationTracker[taskNum]=0;
+		panic();
+	}
+	vTaskDelete( NULL );	
+}
+
+void errHandlerC(void *pvParameter){
+	
+	for(;;){
+		xSemaphoreTake(errFlagSignal, portMAX_DELAY);
+		for (uint8_t i=0; i<NUM_TASKS; i++) {
+			if(errType[tasksInPriorityOrder[i]]>0){
+				errLocationTracker[tasksInPriorityOrder[i]]++;
+				//start a delay to decrement it
+				xQueueSend(errToDecrementQueue, ( void * ) &tasksInPriorityOrder[i], 0);
+				xTaskCreatePinnedToCore(errDecrementerNC, NULL, 4096, NULL, ERRDECREMENTER_P, NULL, TASK_CORE_NC);
+				
+				if(errLocationTracker[tasksInPriorityOrder[i]]>=3){
+					//do something when it fails three times within a certain time frame
+				}
+				xSemaphoreGive(recoverySignals[tasksInPriorityOrder[i]]);
+			}
+		}	
+	}
+	vTaskDelete( NULL );
+}
+
+void waitRecoveryNC(uint8_t i){
+	xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
+}
+
+void waitRecoveryC(uint8_t i){
+	xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
 }
 
 //Monitoring tasks
 void eTempratureMonitorNC( void *pvParameters )
 {
-	int errCount=0;
+	
     for( ;; )
     {
+		uint8_t errCount=0;
 		float tempTempurature=0;
-		for(int i=0;i<3;i++){
+		for(uint8_t i=0;i<3;i++){			
 			//read tempurature
 			//convert from k to c maybe
 			float t=0;
-			if(t<EXTERNAL_TEMPUTATURE_FLOOR||t>EXTERNAL_TEMPURATURE_CIEL){
-				i--;
-				errCount++;
-				if(errCount>3){
+			if(t<EXTERNAL_TEMPUTATURE_FLOOR||t>EXTERNAL_TEMPURATURE_CIEL){				
+				if(errCount>=3){
 					xSemaphoreGive(errFlagSignal);
-					errType[0]=1;
-					tempTempurature=300;
+					errType[ETEMPURATURE]=1;
+					waitRecoveryNC(ETEMPURATURE);
 					break;
 				}	
+				i--;
+				errCount++;
 			}
 			//add to tempTempurature
-		}
-		if(tempTempurature==300){
-			waitRecoveryNC(0);
-		}
-		
+		}		
 		tempTempurature=tempTempurature/3;		
 		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
 		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
@@ -125,11 +180,11 @@ void eTempratureMonitorNC( void *pvParameters )
 
 void iTempratureMonitorC( void *pvParameters )
 {
-	int errCount=0;
+	uint8_t errCount=0;
     for( ;; )
     {
 		float tempTempurature=0;
-		for(int i=0;i<3;i++){
+		for(uint8_t i=0;i<3;i++){
 			//read tempurature
 			//convert from k to c maybe
 			float t=0;
@@ -265,24 +320,7 @@ void appControllerNC(void *pvParameter){
 	vTaskDelete( NULL );
 }
 
-void errHandlerC(void *pvParameter){
-	int locations[]={0,0,0,0,0,0,0,0,0,0,0};
-	
-	for(;;){
-		xSemaphoreTake(errFlagSignal, portMAX_DELAY);
-		for (int i=0; i<NUM_TASKS; i++) {
-			if(errType[tasksInPriorityOrder[i]]>0){
-				locations[tasksInPriorityOrder[i]]++;
-				//setup a delay to decrement it
-				if(locations[tasksInPriorityOrder[i]]>=3){
-					//do something when it fails three times within a certain time frame
-				}
-				xSemaphoreGive(recoverySignal[tasksInPriorityOrder[i]]);
-			}
-		}	
-	}
-	vTaskDelete( NULL );
-}
+
 
 void app_main(void)
 {
@@ -294,24 +332,25 @@ void app_main(void)
 	humidityLock = xSemaphoreCreateMutex();
 	motionLock = xSemaphoreCreateMutex();
 	errFlagSignal = xSemaphoreCreateCounting(11,0);	
-	recoverySignalC = xSemaphoreCreateCounting(10, 0); 
-	recoverySignalNC = xSemaphoreCreateCounting(10, 0);
+	errToDecrementQueue = xQueueCreateStatic( 33, sizeof( uint8_t ), &(errQueueStorage[0]), &errToDecrementQueueBuffer);
 	for (int i = 0; i < NUM_TASKS; i++){
-		semaphores[i] = xSemaphoreCreateBinary();
+		recoverySignals[i] = xSemaphoreCreateBinary();
 	} 
 	
-	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(errHandlerC, NULL, 4096, NULL, ERRHANDLER_P, NULL, TASK_CORE_C);	
 	
-	xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(ledControllerC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(alarmControllerC, NULL, 4096, NULL, TASK_PRIO_C_MONITOR, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, TASK_PRIO_NC_MONITOR, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, BRIGHTNESS_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, HEARTBEAT_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, CO2_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, HUMIDITY_P, NULL, TASK_CORE_NC);
+	
+	xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, LCD_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, LED_NC_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(ledControllerC, NULL, 4096, NULL, LED_C_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(alarmControllerC, NULL, 4096, NULL, ALARM_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, APP_P, NULL, TASK_CORE_NC);
 		
 	while (true) {
         printf("Hello from app_main!\n");
