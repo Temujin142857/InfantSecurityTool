@@ -1,11 +1,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "portmacro.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include "I2C.h"
 #include "max30102.h"
+#include "algorithm_by_RF.h"
 
 
 #define NUM_TASKS 14
@@ -46,7 +48,7 @@ typedef enum {
 } TaskPrioroties;
 
 const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT_PROCESSOR, HEARTBEAT_MONITOR, CO2, ITEMPURATURE, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
-const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 10, 1000, 30000};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000};
 
 //Which core to pin the tasks to
 #define TASK_CORE_NC 0
@@ -63,6 +65,12 @@ const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 3
 #define INTERNAL_TEMPURATURE_CIEL 50
 #define INTERNAL_TEMPURATURE_FLOOR 20
 
+#define RED_CIEL 200000
+#define RED_FLOOR 5000
+#define IR_CIEL 200000
+#define IR_FLOOR 5000
+
+
 //not sure what these will look like yet
 #define CO2_LEVEL_MAX 1
 #define HUMIDITY_MAX 0.55
@@ -78,6 +86,8 @@ static volatile int brightness;
 static SemaphoreHandle_t brightnessLock;
 static volatile int heartbeat;
 static SemaphoreHandle_t heartbeatLock;
+static volatile int SO2Level;
+static SemaphoreHandle_t SO2Lock;
 static volatile int CO2Level;
 static SemaphoreHandle_t CO2LevelLock;
 static volatile int humidity;
@@ -99,6 +109,7 @@ static volatile uint8_t errType[11];
 static uint8_t errLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
 
 static SemaphoreHandle_t errFlagSignalMajor;
+static uint8_t majorErrLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
 
 static QueueHandle_t errToDecrementQueue;
 StaticQueue_t errToDecrementQueueBuffer;
@@ -150,8 +161,21 @@ void waitRecoveryNC(uint8_t i){
 	xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
 }
 
-void waitRecoveryC(uint8_t i){
-	xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
+//return 0 is recovered, return 1 is not
+uint8_t waitRecoveryC(uint8_t i){
+	if(xSemaphoreTake(recoverySignals[i], 0)){
+		return 0;
+	}else if(xSemaphoreTake(errFlagSignalMajor, 0)){
+		if(majorErrLocationTracker[i]>0){
+			xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
+			return 0;
+		} else{
+			xSemaphoreGive(errFlagSignalMajor);
+			return 1;
+		}		
+	} else {
+		return 1;
+	}
 }
 
 //Monitoring tasks
@@ -242,17 +266,51 @@ void brightnessMonitorNC( void *pvParameters )
 
 void heartbeatMonitorC( void *pvParameters )
 {	
+	uint8_t errCount=0;
+	uint8_t batchCount=0;
+	uint8_t badBatchCount=0;
 	uint8_t index=0;
+	const uint8_t maxSamplesPerReadBatch=8;
+	const uint8_t samplesPerProcessingRound=128;
+	uint8_t awaitingErrProcessing=0;
+	int samplesInBatch;
+	TickType_t lastWakeTime = xTaskGetTickCount();
+	
     for( ;; )
     {
+		if(awaitingErrProcessing){
+			awaitingErrProcessing = waitRecoveryC(HEARTBEAT_MONITOR);
+		}
 		max_sample_t tempSamples[8];
-		max30102_read_fifo(&tempSamples[0], 8);
-		index++;
-		if(index>99){
+		samplesInBatch = max30102_read_fifo(&tempSamples[0], maxSamplesPerReadBatch);
+		for(int i=0;i<samplesInBatch;i++){
+			//note we check as a pair, since only including one would desync the indexes of the array
+			if(tempSamples[i].ir<IR_FLOOR&&tempSamples[i].ir>IR_FLOOR&&tempSamples[i].red<RED_FLOOR&&tempSamples[i].red>RED_FLOOR){
+				activeIRSamples[index+i]=tempSamples[i].ir;
+				activeREDSamples[index+i]=tempSamples[i].red;
+			} else{
+				errCount++;
+			}	
+		}
+		batchCount++;
+		if(errCount>=samplesInBatch/2){
+			badBatchCount++;
+		}		
+		errCount=0;
+		//note we increment the index regardless of errors, basically it means we reuse the previous cycles mesurements instead of the erronious ones
+		index+=samplesInBatch;
+		if(index>=samplesPerProcessingRound){
+			if(badBatchCount>=batchCount/2){
+				errLocationTracker[HEARTBEAT_MONITOR]=1;
+				xSemaphoreGive(errFlagSignal);
+				awaitingErrProcessing=1;
+			}
 			xSemaphoreGive(heartbeatLock); 
+			batchCount=0;
+			badBatchCount=0;
 			index=0;
 		}
-		vTaskDelay(delayInMillisecondsForMonitorTasks[HEARTBEAT_MONITOR]);
+		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(delayInMillisecondsForMonitorTasks[HEARTBEAT_MONITOR]));
     }
     vTaskDelete( NULL );
 }
@@ -260,29 +318,36 @@ void heartbeatMonitorC( void *pvParameters )
 
 void heartbeatProcessorC(void *pvParameters)
 {
-    int32_t spo2;
+    float spo2;
     int8_t spo2_valid;
     int32_t heart_rate;
     int8_t hr_valid;
+	float ratio;
+	float correl;
 
     for ( ;; )
     {
         if (xSemaphoreTake(heartbeatLock, portMAX_DELAY))
         {
-            // Call Maxim algorithm
-            /*
-			maxim_heart_rate_and_oxygen_saturation(activeIRSamples, HEARTBEAT_BUFFER_SIZE, activeREDSamples, &spo2, &spo2_valid, &heart_rate, &hr_valid);
+            // Call Maxim algorithm 
+			rf_heart_rate_and_oxygen_saturation(activeIRSamples, HEARTBEAT_BUFFER_SIZE, activeREDSamples, &spo2, &spo2_valid, &heart_rate, &hr_valid, &ratio, &correl);
 
             if (hr_valid)
             {
-            	printf("Heart Rate: %i bpm\n", heart_rate);
-            }
+				printf("Heart Rate: %li bpm\n", (long) heart_rate);
+				heartbeat=heart_rate;
+            } 
 
             if (spo2_valid)
             {
-            	printf("SpO2: %i %%\n", spo2);
+            	printf("SpO2: %f %%\n", spo2);
+				SO2Level=spo2;
             }   
-			*/
+			
+			if(!spo2_valid&&!hr_valid){				
+				errLocationTracker[HEARTBEAT_PROCESSOR]=1;
+				xSemaphoreGive(errFlagSignal);
+			}		
         }
     }
 	vTaskDelete( NULL );
