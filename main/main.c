@@ -4,16 +4,19 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include "I2C.h"
+#include "max30102.h"
 
 
-#define NUM_TASKS 13
+#define NUM_TASKS 14
 #define NUM_MONITORS 6
 
 typedef enum {
     ETEMPURATURE = 0,
     ITEMPURATURE,
     BRIGHTNESS,
-    HEARTBEAT,
+    HEARTBEAT_MONITOR,
+	HEARTBEAT_PROCESSOR,
     CO2,
     HUMIDITY,
     LED_NC,
@@ -36,13 +39,14 @@ typedef enum {
 	ERRHANDLER_P,
 	ITEMPURATURE_P,
 	CO2_P,
-	HEARTBEAT_P,	
+	HEARTBEAT_MONITOR_P,
+	HEARTBEAT_PROCESSOR_P,	
 	LED_C_P,	   
 	ALARM_P,
 } TaskPrioroties;
 
-const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT, CO2, ITEMPURATURE, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
-const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000};
+const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT_PROCESSOR, HEARTBEAT_MONITOR, CO2, ITEMPURATURE, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 10, 1000, 30000};
 
 //Which core to pin the tasks to
 #define TASK_CORE_NC 0
@@ -82,11 +86,19 @@ static SemaphoreHandle_t humidityLock;
 static volatile int motion;
 static SemaphoreHandle_t motionLock;
 
+
+//heartbeat preocessing variables
+#define HEARTBEAT_BUFFER_SIZE 100
+uint32_t activeIRSamples[HEARTBEAT_BUFFER_SIZE]; 
+uint32_t activeREDSamples[HEARTBEAT_BUFFER_SIZE]; 
+
 //error handling variables
 //errFlagSignal is a queue in case multiple systems fail simultaneously
 static SemaphoreHandle_t errFlagSignal;
 static volatile uint8_t errType[11];
 static uint8_t errLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
+
+static SemaphoreHandle_t errFlagSignalMajor;
 
 static QueueHandle_t errToDecrementQueue;
 StaticQueue_t errToDecrementQueueBuffer;
@@ -107,10 +119,6 @@ void errDecrementerNC(void *pvParameter){
 	xQueueReceive(errToDecrementQueue, &taskNum, portMAX_DELAY);
 	vTaskDelay(delayInMillisecondsForMonitorTasks[taskNum]);
 	errLocationTracker[taskNum]--;
-	if(errLocationTracker[taskNum]<0){
-		errLocationTracker[taskNum]=0;
-		panic();
-	}
 	vTaskDelete( NULL );	
 }
 
@@ -126,9 +134,12 @@ void errHandlerC(void *pvParameter){
 				xTaskCreatePinnedToCore(errDecrementerNC, NULL, 4096, NULL, ERRDECREMENTER_P, NULL, TASK_CORE_NC);
 				
 				if(errLocationTracker[tasksInPriorityOrder[i]]>=3){
-					//do something when it fails three times within a certain time frame
-				}
-				xSemaphoreGive(recoverySignals[tasksInPriorityOrder[i]]);
+					//enter error state when it fails three times within a certain time frame
+					//revisit when logic for display and lights are more clear
+					
+				} else{
+					xSemaphoreGive(recoverySignals[tasksInPriorityOrder[i]]);
+				}				
 			}
 		}	
 	}
@@ -230,14 +241,51 @@ void brightnessMonitorNC( void *pvParameters )
 
 
 void heartbeatMonitorC( void *pvParameters )
-{
+{	
+	uint8_t index=0;
     for( ;; )
     {
-		heartbeat=10;
-		xSemaphoreGive(heartbeatLock);
-		vTaskDelay(10000);
+		max_sample_t tempSamples[8];
+		max30102_read_fifo(&tempSamples[0], 8);
+		index++;
+		if(index>99){
+			xSemaphoreGive(heartbeatLock); 
+			index=0;
+		}
+		vTaskDelay(delayInMillisecondsForMonitorTasks[HEARTBEAT_MONITOR]);
     }
     vTaskDelete( NULL );
+}
+
+
+void heartbeatProcessorC(void *pvParameters)
+{
+    int32_t spo2;
+    int8_t spo2_valid;
+    int32_t heart_rate;
+    int8_t hr_valid;
+
+    for ( ;; )
+    {
+        if (xSemaphoreTake(heartbeatLock, portMAX_DELAY))
+        {
+            // Call Maxim algorithm
+            /*
+			maxim_heart_rate_and_oxygen_saturation(activeIRSamples, HEARTBEAT_BUFFER_SIZE, activeREDSamples, &spo2, &spo2_valid, &heart_rate, &hr_valid);
+
+            if (hr_valid)
+            {
+            	printf("Heart Rate: %i bpm\n", heart_rate);
+            }
+
+            if (spo2_valid)
+            {
+            	printf("SpO2: %i %%\n", spo2);
+            }   
+			*/
+        }
+    }
+	vTaskDelete( NULL );
 }
 
 void CO2MonitorC( void *pvParameters )
@@ -269,8 +317,7 @@ void ledControllerNC(void *pvParameter){
 	
 	for( ;; )
 	{
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		//xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
 	}
 	vTaskDelete( NULL );
@@ -280,8 +327,7 @@ void ledControllerC(void *pvParameter){
 
 	for( ;; )
 	{
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		//xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
 	}
 	vTaskDelete( NULL );
@@ -291,8 +337,7 @@ void lcdControllerNC(void *pvParameter){
 
 	for( ;; )
 	{
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		//xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
 	}
 	vTaskDelete( NULL );
@@ -302,8 +347,7 @@ void alarmControllerC(void *pvParameter){
 
 	for( ;; )
 	{
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		//xSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
 	}
 	vTaskDelete( NULL );
@@ -313,8 +357,7 @@ void appControllerNC(void *pvParameter){
 
 	for( ;; )
 	{
-		tempurature=10;
-		xSemaphoreGive(temputatureLock);
+		//dxSemaphoreGive(temputatureLock);
 		vTaskDelay(10000);
 	}
 	vTaskDelete( NULL );
@@ -323,7 +366,14 @@ void appControllerNC(void *pvParameter){
 
 
 void app_main(void)
-{
+{	
+	//init sensors
+	i2c_master_init();	    
+	max30102_init();
+	
+	//init interfaceComponents
+	
+	//init semaphores
 	eTemputatureLock = xSemaphoreCreateMutex();
 	iTemputatureLock = xSemaphoreCreateMutex();
 	brightnessLock = xSemaphoreCreateMutex();
@@ -342,7 +392,11 @@ void app_main(void)
 	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, BRIGHTNESS_P, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, HEARTBEAT_P, NULL, TASK_CORE_C);
+	//note we put the heartbeat monitor and processing on the same core, 
+	//even though they will use a lot of the cpu time, because preventing them 
+	//from running in paralell helps avoid them accessing the same memory locations simultaneously
+	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, HEARTBEAT_MONITOR_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(heartbeatProcessorC, NULL, 4096, NULL, HEARTBEAT_PROCESSOR_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, CO2_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, HUMIDITY_P, NULL, TASK_CORE_NC);
 	
