@@ -1,7 +1,7 @@
 {
     "version":            "1.3",
     "project_name":       "app-template",
-    "project_version":    "3df6806-dirty",
+    "project_version":    "0f6ea54-dirty",
     "project_path":       "C:/Users/Tomio/Programming/InfantSecurityTool",
     "idf_path":           "C:/esp/v6.0/esp-idf",
     "build_dir":          "C:/Users/Tomio/Programming/InfantSecurityTool/build",
@@ -1735,7 +1735,7 @@
             "managed_reqs": [],
             "managed_priv_reqs": [],
             "file": "C:/Users/Tomio/Programming/InfantSecurityTool/build/esp-idf/main/libmain.a",
-            "sources": [ "C:/Users/Tomio/Programming/InfantSecurityTool/main/main.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/I2C.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/algorithm_by_RF.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/max30102.c" ],
+            "sources": [ "C:/Users/Tomio/Programming/InfantSecurityTool/main/main.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/I2C.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/algorithm_by_RF.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/max30102.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/lcd.c", "C:/Users/Tomio/Programming/InfantSecurityTool/main/led.c" ],
             "include_dirs": []
         },
         "mbedtls": {
