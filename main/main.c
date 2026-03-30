@@ -93,7 +93,7 @@ static volatile int brightness;
 static SemaphoreHandle_t brightnessLock;
 static volatile int heartbeat;
 static volatile int SO2Level;
-static SemaphoreHandle_t heartProcessLock;
+static SemaphoreHandle_t heartProcessSignal;
 static SemaphoreHandle_t heartLock;
 static volatile int CO2Level;
 static SemaphoreHandle_t CO2LevelLock;
@@ -138,11 +138,17 @@ uint32_t activeREDSamples[HEARTBEAT_BUFFER_SIZE];
 //error handling variables
 //errFlagSignal is a queue in case multiple systems fail simultaneously
 static SemaphoreHandle_t errFlagSignal;
+//this is how each task tells the errHandler what kind of error it has
+static SemaphoreHandle_t errTypeLock;
 static volatile uint8_t errType[11];
+
+static SemaphoreHandle_t errLocationTrackerLock;
 static uint8_t errLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
 
 static SemaphoreHandle_t errFlagSignalMajor;
-static uint8_t majorErrLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
+static volatile uint8_t majorErrLocationTracker[NUM_TASKS]={0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0};
+static SemaphoreHandle_t errMajorTaskWating;
+static volatile uint8_t errWatingTracker[NUM_TASKS]={0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0}
 
 static QueueHandle_t errToDecrementQueue;
 StaticQueue_t errToDecrementQueueBuffer;
@@ -155,7 +161,7 @@ static SemaphoreHandle_t recoverySignals[NUM_TASKS];
 //static portMUX_TYPE s_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 // start of error handling tasks
-void errDecrementerNC(void *pvParameter){
+void errDecrementerC(void *pvParameter){
 	uint8_t taskNum;	
 	xQueueReceive(errToDecrementQueue, &taskNum, portMAX_DELAY);
 	vTaskDelay(delayInMillisecondsForMonitorTasks[taskNum]);
@@ -172,7 +178,7 @@ void errHandlerC(void *pvParameter){
 				errLocationTracker[tasksInPriorityOrder[i]]++;
 				//start a delay to decrement it
 				xQueueSend(errToDecrementQueue, ( void * ) &tasksInPriorityOrder[i], 0);
-				xTaskCreatePinnedToCore(errDecrementerNC, NULL, 4096, NULL, ERRDECREMENTER_P, NULL, TASK_CORE_NC);
+				xTaskCreatePinnedToCore(errDecrementerC, NULL, 4096, NULL, ERRDECREMENTER_P, NULL, TASK_CORE_C);
 				
 				if(errLocationTracker[tasksInPriorityOrder[i]]>=3){
 					//enter error state when it fails three times within a certain time frame
@@ -203,7 +209,6 @@ uint8_t waitRecoveryC(uint8_t i){
 			xSemaphoreTake(recoverySignals[i], portMAX_DELAY);
 			return 0;
 		} else{
-			xSemaphoreGive(errFlagSignalMajor);
 			return 1;
 		}		
 	} else {
@@ -352,7 +357,7 @@ void heartbeatMonitorC( void *pvParameters )
 				xSemaphoreGive(errFlagSignal);
 				awaitingErrProcessing=1;
 			}
-			xSemaphoreGive(heartProcessLock); 
+			xSemaphoreGive(heartProcessSignal); 
 			batchCount=0;
 			badBatchCount=0;
 			index=0;
@@ -619,7 +624,7 @@ void app_main(void)
 	CO2LevelLock = xSemaphoreCreateMutex();
 	humidityLock = xSemaphoreCreateMutex();
 	motionLock = xSemaphoreCreateMutex();
-	heartProcessLock = xSemaphoreCreateBinary();
+	heartProcessSignal = xSemaphoreCreateBinary();
 	
 	//ui queues
 	ledControllerNC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(ledControllerNC_QueueStorage[0]), &ledControllerNC_QueueBuffer);
@@ -629,6 +634,8 @@ void app_main(void)
 	appControllerNC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(appControllerNC_QueueStorage[0]), &appControllerNC_QueueBuffer);
 	
 	//error semaphores and queue
+	errLocationTrackerLock=xSemaphoreCreateMutex();
+	errTypeLock=xSemaphoreCreateMutex();
 	errFlagSignal = xSemaphoreCreateCounting(NUM_TASKS,0);	
 	errFlagSignalMajor = xSemaphoreCreateBinary();
 	errToDecrementQueue = xQueueCreateStatic( NUM_TASKS * 3, sizeof( uint8_t ), &(errQueueStorage[0]), &errToDecrementQueueBuffer);
