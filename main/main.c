@@ -441,7 +441,9 @@ void humidityMonitorNC( void *pvParameters )
 //end of monitor tasks
 
 //ui helpers
-void readTheSharedData(int id, float *tempTempurature, float *tempBrightness, float *tempHeartbeat, float *tempSO2Level, float *tempCO2Level, float *tempHumidity, float *tempMotion){
+//maybe make this the controller, and have it call the other ui tasks
+//like it processes the data, and decides who needs to update their values
+void readTheSharedData(int id, float *tempTempurature, float *tempBrightness, int *tempHeartbeat, int *tempSO2Level, int *tempCO2Level, int *tempHumidity, int *tempMotion){
 	switch (id){
 		case ETEMPURATURE:
 			xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
@@ -488,20 +490,28 @@ void readTheSharedData(int id, float *tempTempurature, float *tempBrightness, fl
 	}
 }
 
-uint8_t checkTempurature(){
+
+//0 is fine, 1 is warning, 2 is emergency
+uint8_t eTempuratureCheck(float tempurature){
 	return 0;
 }
+
+uint8_t iTempuratureCheck(float tempurature){
+	return 0;
+}
+
+
 
 //ui level tasks
 void ledControllerNC(void *pvParameter){
 	uint8_t monitorId;
 	float tempTempurature;
 	float tempBrightness;
-	float tempHeartbeat;
-	float tempSO2Level;
-	float tempCO2Level;
-	float tempHumidity;
-	float tempMotion;
+	int tempHeartbeat;
+	int tempSO2Level;
+	int tempCO2Level;
+	int tempHumidity;
+	int tempMotion;
 	
 	for( ;; )
 	{
@@ -517,11 +527,11 @@ void ledControllerC(void *pvParameter){
 	uint8_t monitorId;
 	float tempTempurature;
 	float tempBrightness;
-	float tempHeartbeat;
-	float tempSO2Level;
-	float tempCO2Level;
-	float tempHumidity;
-	float tempMotion;
+	int tempHeartbeat;
+	int tempSO2Level;
+	int tempCO2Level;
+	int tempHumidity;
+	int tempMotion;
 	for( ;; )
 	{
 		monitorId=xQueueSemaphoreTake(ledControllerC_Queue, portMAX_DELAY);
@@ -535,11 +545,11 @@ void lcdControllerNC(void *pvParameter){
 	uint8_t monitorId;
 	float tempTempurature;
 	float tempBrightness;
-	float tempHeartbeat;
-	float tempSO2Level;
-	float tempCO2Level;
-	float tempHumidity;
-	float tempMotion;
+	int tempHeartbeat;
+	int tempSO2Level;
+	int tempCO2Level;
+	int tempHumidity;
+	int tempMotion;
 	char toDisplay[18];
 	for( ;; )
 	{
@@ -557,11 +567,11 @@ void alarmControllerC(void *pvParameter){
 	uint8_t monitorId;
 	float tempTempurature;
 	float tempBrightness;
-	float tempHeartbeat;
-	float tempSO2Level;
-	float tempCO2Level;
-	float tempHumidity;
-	float tempMotion;
+	int tempHeartbeat;
+	int tempSO2Level;
+	int tempCO2Level;
+	int tempHumidity;
+	int tempMotion;
 	for( ;; )
 	{
 		monitorId=xQueueSemaphoreTake(alarmControllerC_Queue, portMAX_DELAY);
@@ -575,11 +585,11 @@ void appControllerNC(void *pvParameter){
 	uint8_t monitorId;
 	float tempTempurature;
 	float tempBrightness;
-	float tempHeartbeat;
-	float tempSO2Level;
-	float tempCO2Level;
-	float tempHumidity;
-	float tempMotion;
+	int tempHeartbeat;
+	int tempSO2Level;
+	int tempCO2Level;
+	int tempHumidity;
+	int tempMotion;
 	for( ;; )
 	{
 		monitorId=xQueueSemaphoreTake(appControllerNC_Queue, portMAX_DELAY);
