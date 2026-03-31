@@ -1,5 +1,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/projdefs.h"
 #include "portmacro.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -10,11 +11,15 @@
 #include "algorithm_by_RF.h"
 #include "lcd.h"
 #include "led.h"
+#include "MQ2.h"
+#include "MPU6050.h"
 
 
 #define NUM_TASKS 15
 #define NUM_MONITORS 8
 #define NUM_UI_TASKS 5
+
+#define MAX_DISPLAY_LENGTH 18
 
 typedef enum {
     ETEMPURATURE = 0,
@@ -22,7 +27,7 @@ typedef enum {
     BRIGHTNESS,
     HEARTBEAT_MONITOR,
 	HEARTBEAT_PROCESSOR,
-    CO2,
+    SMOKE,
     HUMIDITY,
 	MOTION,
     LED_NC,
@@ -45,15 +50,15 @@ typedef enum {
    	ERRDECREMENTER_P,
 	ERRHANDLER_P,
 	ITEMPURATURE_P,
-	CO2_P,
+	SMOKE_P,
 	HEARTBEAT_MONITOR_P,
 	HEARTBEAT_PROCESSOR_P,	
 	LED_C_P,	   
 	ALARM_P,
 } TaskPrioroties;
 
-const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT_PROCESSOR, HEARTBEAT_MONITOR, CO2, ITEMPURATURE, MOTION, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
-const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000, 300};
+const int tasksInPriorityOrder[NUM_TASKS]={ALARM, LED_C, HEARTBEAT_PROCESSOR, HEARTBEAT_MONITOR, SMOKE, ITEMPURATURE, MOTION, ERRHANDLER, ERRDECREMENTER, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000, 300, 100};
 
 
 //Which core to pin the tasks to
@@ -77,12 +82,19 @@ const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 3
 #define IR_CIEL 200000
 #define IR_FLOOR 5000
 
+#define SMOKE_BATCH_SIZE 5
+#define SMOKE_LEVEL_MAX 1
+#define SMOKE_FLOOR_MV   100
+#define SMOKE_CIEL_MV   3200
 
 //not sure what these will look like yet
-#define CO2_LEVEL_MAX 1
+
+
 #define HUMIDITY_MAX 0.55
 #define HEARTBEAT_MIN 1
 #define HEARTBEAT_MAX 1
+
+static SemaphoreHandle_t I2CLock;
 
 //shared data variables and semiphores
 static volatile float eTempurature;
@@ -95,33 +107,15 @@ static volatile int heartbeat;
 static volatile int SO2Level;
 static SemaphoreHandle_t heartProcessSignal;
 static SemaphoreHandle_t heartLock;
-static volatile int CO2Level;
-static SemaphoreHandle_t CO2LevelLock;
+static volatile int smokeLevel;
+static SemaphoreHandle_t smokeLevelLock;
+static int mq2Baseline_mv = 0;
 static volatile int humidity;
 static SemaphoreHandle_t humidityLock;
 //motion will probably be an array?
-static volatile int motion;
+static volatile int timeSinceLastMotion;
 static SemaphoreHandle_t motionLock;
 
-//these queues will be how the monitors notify the ui tasks that there is new data
-//i.e., these are the ui task inboxes
-static QueueHandle_t ledControllerNC_Queue;
-static QueueHandle_t ledControllerC_Queue;
-static QueueHandle_t lcdControllerNC_Queue;
-static QueueHandle_t alarmControllerC_Queue;
-static QueueHandle_t appControllerNC_Queue;
-
-StaticQueue_t ledControllerNC_QueueBuffer;
-StaticQueue_t ledControllerC_QueueBuffer;
-StaticQueue_t lcdControllerNC_QueueBuffer;
-StaticQueue_t alarmControllerC_QueueBuffer;
-StaticQueue_t appControllerNC_QueueBuffer;
-
-uint8_t ledControllerNC_QueueStorage[sizeof(uint8_t) * NUM_MONITORS];
-uint8_t ledControllerC_QueueStorage[sizeof(uint8_t) * NUM_MONITORS];
-uint8_t lcdControllerNC_QueueStorage[sizeof(uint8_t) * NUM_MONITORS];
-uint8_t alarmControllerC_QueueStorage[sizeof(uint8_t) * NUM_MONITORS];
-uint8_t appControllerNC_QueueStorage[sizeof(uint8_t) * NUM_MONITORS];
 
 //assigning the ui task handles in case I want to use notification later
 TaskHandle_t ledControllerNC_Handle = NULL;
@@ -129,6 +123,13 @@ TaskHandle_t ledControllerC_Handle = NULL;
 TaskHandle_t lcdControllerNC_Handle = NULL;
 TaskHandle_t alarmControllerC_Handle = NULL;
 TaskHandle_t appControllerNC_Handle = NULL;
+
+//shared memory for communicating ui changes
+static volatile int lightsToChangC;
+static volatile int lightsToChangeNC;
+static volatile char toDisplay[MAX_DISPLAY_LENGTH];
+
+
 
 //heartbeat preocessing variables
 #define HEARTBEAT_BUFFER_SIZE 100
@@ -148,7 +149,7 @@ static uint8_t errLocationTracker[]={0,0,0,0,0,0,0,0,0,0,0};
 static SemaphoreHandle_t errFlagSignalMajor;
 static volatile uint8_t majorErrLocationTracker[NUM_TASKS]={0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0};
 static SemaphoreHandle_t errMajorTaskWating;
-static volatile uint8_t errWatingTracker[NUM_TASKS]={0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0}
+static volatile uint8_t errWatingTracker[NUM_TASKS]={0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0};
 
 static QueueHandle_t errToDecrementQueue;
 StaticQueue_t errToDecrementQueueBuffer;
@@ -216,12 +217,25 @@ uint8_t waitRecoveryC(uint8_t i){
 	}
 }
 
+
 void notifyAllUITasks(uint32_t id){
-	xQueueSend(ledControllerNC_Queue, (void *) &id, 0);
-	xQueueSend(ledControllerC_Queue, (void *) &id, 0);
-	xQueueSend(lcdControllerNC_Queue, (void *) &id, 0);
-	xQueueSend(alarmControllerC_Queue, (void *) &id, 0);
-	xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+	//xQueueSend(ledControllerNC_Queue, (void *) &id, 0);
+	//xQueueSend(ledControllerC_Queue, (void *) &id, 0);
+	//xQueueSend(lcdControllerNC_Queue, (void *) &id, 0);
+	//xQueueSend(alarmControllerC_Queue, (void *) &id, 0);
+	//xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+}
+
+
+void mq2Calibrate(void)
+{
+	
+    int sum = 0;
+    for (int i = 0; i < 50; i++) {
+        sum += mq2_read_mv();
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    mq2Baseline_mv = sum / 50;
 }
 
 
@@ -334,7 +348,9 @@ void heartbeatMonitorC( void *pvParameters )
 			awaitingErrProcessing = waitRecoveryC(HEARTBEAT_MONITOR);
 		}
 		max_sample_t tempSamples[8];
+		xSemaphoreTake(I2CLock, portMAX_DELAY);
 		samplesInBatch = max30102_read_fifo(&tempSamples[0], maxSamplesPerReadBatch);
+		xSemaphoreGive(I2CLock);
 		for(int i=0;i<samplesInBatch;i++){
 			//note we check as a pair, since only including one would desync the indexes of the array
 			if(tempSamples[i].ir<IR_FLOOR&&tempSamples[i].ir>IR_FLOOR&&tempSamples[i].red<RED_FLOOR&&tempSamples[i].red>RED_FLOOR){
@@ -380,34 +396,27 @@ void heartbeatProcessorC(void *pvParameters)
 
     for ( ;; )
     {
-        if (xSemaphoreTake(heartProcessLock, portMAX_DELAY))
-        {
+        if (xSemaphoreTake(heartProcessSignal, portMAX_DELAY)){
             // Call Maxim algorithm 
 			rf_heart_rate_and_oxygen_saturation(activeIRSamples, HEARTBEAT_BUFFER_SIZE, activeREDSamples, &spo2, &spo2_valid, &heart_rate, &hr_valid, &ratio, &correl);
 
 			if(spo2_valid||hr_valid){
 				xSemaphoreTake(heartLock, portMAX_DELAY);
-			}	
-						
-            if (hr_valid)
-            {
+			}							
+            if (hr_valid){
 				printf("Heart Rate: %li bpm\n", (long) heart_rate);
 				heartbeat=heart_rate;
             } 
-
-            if (spo2_valid)
-            {
+            if (spo2_valid){
             	printf("SpO2: %f %%\n", spo2);
 				SO2Level=spo2;
-            }   
-			
+            }   			
 			if(!spo2_valid||!hr_valid){		
 				//note no need to block if there's an error, any time the sensor isn't blocked it should try to process the data
 				//if there's something wrong with the sensor it should block itself at that level, not needed here		
 				errLocationTracker[HEARTBEAT_PROCESSOR]=1;
 				xSemaphoreGive(errFlagSignal);
-			}		
-			
+			}				
 			if(spo2_valid||hr_valid){
 				xSemaphoreGive(heartLock);
 				notifyAllUITasks(HEARTBEAT_PROCESSOR);
@@ -417,15 +426,44 @@ void heartbeatProcessorC(void *pvParameters)
 	vTaskDelete( NULL );
 }
 
-void CO2MonitorC( void *pvParameters )
+void smokeMonitorC( void *pvParameters )
 {
+	uint8_t awaitingErrProcessing=0;
+	uint8_t errCount;
+	int tempSmokeLevel_mv;
+	int sum;
+	
+	vTaskDelay(pdMS_TO_TICKS(60));
+	mq2Calibrate();
+	
     for( ;; )
     {
-		xSemaphoreTake(CO2LevelLock, portMAX_DELAY);
-		CO2Level=10;
-		xSemaphoreGive(CO2LevelLock);
-		notifyAllUITasks(CO2);
-		vTaskDelay(delayInMillisecondsForMonitorTasks[CO2]);
+		if(awaitingErrProcessing){
+			awaitingErrProcessing = waitRecoveryC(HEARTBEAT_MONITOR);
+		}
+		errCount=0;
+		sum=0;
+		for (int i=0; i<SMOKE_BATCH_SIZE; i++) {			
+			tempSmokeLevel_mv=mq2_read_mv();
+			if(tempSmokeLevel_mv >= SMOKE_CIEL_MV && tempSmokeLevel_mv <= SMOKE_FLOOR_MV){
+				errCount++;
+			} else{
+				sum+=tempSmokeLevel_mv;
+			}
+		}
+		if(errCount>SMOKE_BATCH_SIZE/2){
+			errLocationTracker[SMOKE]=1;
+			xSemaphoreGive(errFlagSignal);
+			awaitingErrProcessing=1;
+		}else{
+			tempSmokeLevel_mv=sum/SMOKE_BATCH_SIZE;			
+			xSemaphoreTake(smokeLevelLock, portMAX_DELAY);
+			smokeLevel=tempSmokeLevel_mv;
+			xSemaphoreGive(smokeLevelLock);
+		}
+		
+		notifyAllUITasks(SMOKE);
+		vTaskDelay(delayInMillisecondsForMonitorTasks[SMOKE]);
     }
     vTaskDelete( NULL );
 }
@@ -443,104 +481,200 @@ void humidityMonitorNC( void *pvParameters )
     vTaskDelete( NULL );
 }
 
+void motionMonitorNC( void *pvParameters )
+{
+	mpu6050_data_t data;
+	TickType_t lastMovementTick = xTaskGetTickCount();
+    for( ;; )
+    {
+		xSemaphoreTake(I2CLock, portMAX_DELAY);
+		mpu6050_read(&data);
+		xSemaphoreGive(I2CLock);	
+		
+		float delta = motion_delta(&data);
+		//we will have to calibrate
+		const float MOTION_THRESHOLD = 0.15f;
+		
+		if (delta > MOTION_THRESHOLD){
+			// Movement detected → reset timer
+			lastMovementTick = xTaskGetTickCount();
+		}		
+		TickType_t now = xTaskGetTickCount();
+		TickType_t diffTicks = now - lastMovementTick;
+		int seconds = diffTicks * portTICK_PERIOD_MS / 1000;
+		int minutes = seconds / 60;
+		
+		xSemaphoreTake(motionLock, portMAX_DELAY);
+		timeSinceLastMotion = minutes;
+		xSemaphoreGive(motionLock);
+		notifyAllUITasks(MOTION);
+		
+		vTaskDelay(delayInMillisecondsForMonitorTasks[HUMIDITY]);
+    }
+    vTaskDelete( NULL );
+}
+
 //end of monitor tasks
 
 //ui helpers
-//maybe make this the controller, and have it call the other ui tasks
-//like it processes the data, and decides who needs to update their values
-void readTheSharedData(int id, float *tempTempurature, float *tempBrightness, int *tempHeartbeat, int *tempSO2Level, int *tempCO2Level, int *tempHumidity, int *tempMotion){
-	switch (id){
-		case ETEMPURATURE:
-			xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
-			*tempTempurature=eTempurature;
-			xSemaphoreGive(eTempuratureLock);
-			break;
-					
-		case ITEMPURATURE:
-			xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
-			*tempTempurature=iTempurature;
-			xSemaphoreGive(eTempuratureLock);
-			break;	
-					
-		case BRIGHTNESS:
-			xSemaphoreTake(brightnessLock, portMAX_DELAY);
-			*tempBrightness=brightness;
-			xSemaphoreGive(brightnessLock);
-			break;	
-					
-		case HEARTBEAT_PROCESSOR:
-			xSemaphoreTake(heartLock, portMAX_DELAY);
-			*tempHeartbeat=heartbeat;
-			*tempSO2Level=SO2Level;
-			xSemaphoreGive(heartLock);
-			break;	
-									
-		case CO2:
-			xSemaphoreTake(CO2LevelLock, portMAX_DELAY);
-			*tempCO2Level=CO2Level;
-			xSemaphoreGive(CO2LevelLock);
-			break;	
-					
-		case HUMIDITY:
-			xSemaphoreTake(humidityLock, portMAX_DELAY);
-			*tempHumidity=humidity;
-			xSemaphoreGive(humidityLock);
-			break;
-									
-		case MOTION:
-			xSemaphoreTake(motionLock, portMAX_DELAY);
-			*tempMotion=motion;
-			xSemaphoreGive(motionLock);
-			break;														
-	}
-}
-
-
 //0 is fine, 1 is warning, 2 is emergency
 uint8_t eTempuratureCheck(float tempurature){
-	return 0;
+    if (tempurature < 16.0f || tempurature > 28.0f) {
+        return 2;
+    }
+    else if (tempurature < 20.0f || tempurature > 24.0f) {
+        return 1;
+    }
+    return 0;
 }
 
+
 uint8_t iTempuratureCheck(float tempurature){
-	return 0;
+    if (tempurature < 35.5f || tempurature > 38.5f) {
+        return 2;
+    }
+    else if (tempurature < 36.5f || tempurature > 37.5f) {
+        return 1;
+    }
+    return 0;
 }
+
+uint8_t heartbeatCheck(int bpm){
+    if (bpm < 80 || bpm > 180) {
+        return 2;
+    }
+    else if (bpm < 100 || bpm > 160) {
+        return 1;
+    }
+    return 0;
+}
+
+uint8_t smokeCheck(int smoke){
+    if (smoke > 2000) {
+        return 2;
+    }
+    else if (smoke > 1000) {
+        return 1;
+    }
+    return 0;
+}
+
+uint8_t humidityCheck(int humidity){
+    if (humidity < 30 || humidity > 70) {
+        return 2;
+    }
+    else if (humidity < 40 || humidity > 60) {
+        return 1;
+    }
+    return 0;
+}
+
+uint8_t motionCheck(int minutesNoMovement){
+    if (minutesNoMovement > 60) {
+        return 2;
+    }
+    else if (minutesNoMovement > 20) {
+        return 1;
+    }
+    return 0;
+}
+
 
 
 
 //ui level tasks
-void ledControllerNC(void *pvParameter){
-	uint8_t monitorId;
+//maybe make this the controller, and have it call the other ui tasks
+//like it processes the data, and decides who needs to update their values
+void UIController(int id){
 	float tempTempurature;
 	float tempBrightness;
 	int tempHeartbeat;
 	int tempSO2Level;
-	int tempCO2Level;
+	int tempSmokeLevel;
 	int tempHumidity;
 	int tempMotion;
+	char toDisplay[MAX_DISPLAY_LENGTH];
+	
+	
+	for(;;){
+		switch (id){
+			case ETEMPURATURE:
+				xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
+				tempTempurature=eTempurature;
+				xSemaphoreGive(eTempuratureLock);
+				//make an array of constants for each state the lights should be in
+				//and the message that should be displayed
+				//and for what should be sent to the app
+				if(eTempuratureCheck(tempTempurature)==0){
+					xTaskNotifyGive(ledControllerC_Handle);
+				}
+				break;
+						
+			case ITEMPURATURE:
+				xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
+				tempTempurature=iTempurature;
+				xSemaphoreGive(eTempuratureLock);
+				if(iTempuratureCheck(tempTempurature)){
+									
+				}
+				break;	
+						
+			case BRIGHTNESS:
+				xSemaphoreTake(brightnessLock, portMAX_DELAY);
+				tempBrightness=brightness;
+				xSemaphoreGive(brightnessLock);
+				break;	
+						
+			case HEARTBEAT_PROCESSOR:
+				xSemaphoreTake(heartLock, portMAX_DELAY);
+				tempHeartbeat=heartbeat;
+				tempSO2Level=SO2Level;
+				xSemaphoreGive(heartLock);
+				break;	
+										
+			case SMOKE:
+				xSemaphoreTake(smokeLevelLock, portMAX_DELAY);
+				tempSmokeLevel=smokeLevel;
+				xSemaphoreGive(smokeLevelLock);
+				break;	
+						
+			case HUMIDITY:
+				xSemaphoreTake(humidityLock, portMAX_DELAY);
+				tempHumidity=humidity;
+				xSemaphoreGive(humidityLock);
+				break;
+										
+			case MOTION:
+				xSemaphoreTake(motionLock, portMAX_DELAY);
+				tempMotion=timeSinceLastMotion;
+				xSemaphoreGive(motionLock);
+				break;														
+		}
+	}
+}
+
+
+//this one just takes an int, which represents which lights to switch
+void ledControllerNC(void *pvParameter){
+	uint8_t monitorId;
+	int lightsStates;
+	int lightsToswitch;
 	
 	for( ;; )
 	{
-		monitorId=xQueueSemaphoreTake(ledControllerNC_Queue, portMAX_DELAY);
-		readTheSharedData(monitorId, &tempTempurature, &tempBrightness, &tempHeartbeat, &tempSO2Level, &tempCO2Level, &tempHumidity, &tempMotion);
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		gpio_toggle(LED_ORANGE);
 	}
 	vTaskDelete( NULL );
 }
 
 void ledControllerC(void *pvParameter){
-	uint32_t monitorTaskID;
 	uint8_t monitorId;
-	float tempTempurature;
-	float tempBrightness;
-	int tempHeartbeat;
-	int tempSO2Level;
-	int tempCO2Level;
-	int tempHumidity;
-	int tempMotion;
+	int lightsStates;
+	int lightsToswitch;
 	for( ;; )
 	{
-		monitorId=xQueueSemaphoreTake(ledControllerC_Queue, portMAX_DELAY);
-		readTheSharedData(monitorId, &tempTempurature, &tempBrightness, &tempHeartbeat, &tempSO2Level, &tempCO2Level, &tempHumidity, &tempMotion);
+		//monitorId=xQueueSemaphoreTake(ledControllerC_Queue, portMAX_DELAY);
 		gpio_toggle(LED_RED);
 	}
 	vTaskDelete( NULL );
@@ -548,18 +682,11 @@ void ledControllerC(void *pvParameter){
 
 void lcdControllerNC(void *pvParameter){
 	uint8_t monitorId;
-	float tempTempurature;
-	float tempBrightness;
-	int tempHeartbeat;
-	int tempSO2Level;
-	int tempCO2Level;
-	int tempHumidity;
-	int tempMotion;
-	char toDisplay[18];
+	;
+	char toDisplay[MAX_DISPLAY_LENGTH];
 	for( ;; )
 	{
-		monitorId=xQueueSemaphoreTake(lcdControllerNC_Queue, portMAX_DELAY);
-		readTheSharedData(monitorId, &tempTempurature, &tempBrightness, &tempHeartbeat, &tempSO2Level, &tempCO2Level, &tempHumidity, &tempMotion);
+		//toDisplay=xQueueSemaphoreTake(lcdControllerNC_Queue, portMAX_DELAY);		
 
 		LCD_Clear();
 		LCD_SetCursor(0,0);
@@ -569,19 +696,11 @@ void lcdControllerNC(void *pvParameter){
 }
 
 void alarmControllerC(void *pvParameter){
-	uint8_t monitorId;
-	float tempTempurature;
-	float tempBrightness;
-	int tempHeartbeat;
-	int tempSO2Level;
-	int tempCO2Level;
-	int tempHumidity;
-	int tempMotion;
+	uint8_t toggle;
+	
 	for( ;; )
 	{
-		monitorId=xQueueSemaphoreTake(alarmControllerC_Queue, portMAX_DELAY);
-		readTheSharedData(monitorId, &tempTempurature, &tempBrightness, &tempHeartbeat, &tempSO2Level, &tempCO2Level, &tempHumidity, &tempMotion);
-
+		//toggle=xQueueSemaphoreTake(alarmControllerC_Queue, portMAX_DELAY);
 	}
 	vTaskDelete( NULL );
 }
@@ -592,14 +711,12 @@ void appControllerNC(void *pvParameter){
 	float tempBrightness;
 	int tempHeartbeat;
 	int tempSO2Level;
-	int tempCO2Level;
+	int tempSmokeLevel;
 	int tempHumidity;
 	int tempMotion;
 	for( ;; )
 	{
-		monitorId=xQueueSemaphoreTake(appControllerNC_Queue, portMAX_DELAY);
-		readTheSharedData(monitorId, &tempTempurature, &tempBrightness, &tempHeartbeat, &tempSO2Level, &tempCO2Level, &tempHumidity, &tempMotion);
-
+		//monitorId=xQueueSemaphoreTake(appControllerNC_Queue, portMAX_DELAY);	
 	}
 	vTaskDelete( NULL );
 }
@@ -609,6 +726,7 @@ void appControllerNC(void *pvParameter){
 void app_main(void)
 {	
 	//init sensors
+	I2CLock = xSemaphoreCreateMutex();
 	i2c_master_init();	    
 	max30102_init();
 	LCD_Init();
@@ -621,17 +739,11 @@ void app_main(void)
 	iTempuratureLock = xSemaphoreCreateMutex();
 	brightnessLock = xSemaphoreCreateMutex();
 	heartLock = xSemaphoreCreateMutex();
-	CO2LevelLock = xSemaphoreCreateMutex();
+	smokeLevelLock = xSemaphoreCreateMutex();
 	humidityLock = xSemaphoreCreateMutex();
 	motionLock = xSemaphoreCreateMutex();
 	heartProcessSignal = xSemaphoreCreateBinary();
 	
-	//ui queues
-	ledControllerNC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(ledControllerNC_QueueStorage[0]), &ledControllerNC_QueueBuffer);
-	ledControllerC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(ledControllerC_QueueStorage[0]), &ledControllerC_QueueBuffer);
-	lcdControllerNC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(lcdControllerNC_QueueStorage[0]), &lcdControllerNC_QueueBuffer);
-	alarmControllerC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(alarmControllerC_QueueStorage[0]), &alarmControllerC_QueueBuffer);
-	appControllerNC_Queue = xQueueCreateStatic( NUM_MONITORS, sizeof( uint8_t ), &(appControllerNC_QueueStorage[0]), &appControllerNC_QueueBuffer);
 	
 	//error semaphores and queue
 	errLocationTrackerLock=xSemaphoreCreateMutex();
@@ -654,14 +766,14 @@ void app_main(void)
 	//from running in paralell helps avoid them accessing the same memory locations simultaneously
 	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, HEARTBEAT_MONITOR_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(heartbeatProcessorC, NULL, 4096, NULL, HEARTBEAT_PROCESSOR_P, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(CO2MonitorC, NULL, 4096, NULL, CO2_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(smokeMonitorC, NULL, 4096, NULL, SMOKE_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, HUMIDITY_P, NULL, TASK_CORE_NC);	
-	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, LCD_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(motionMonitorNC, NULL, 4096, NULL, MOTION_P, NULL, TASK_CORE_NC);
 	
 	//ui tasks
 	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, LED_NC_P, &ledControllerNC_Handle, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(ledControllerC, NULL, 4096, NULL, LED_C_P, &ledControllerC_Handle, TASK_CORE_C);
-	xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, LED_C_P, &lcdControllerNC_Handle, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, LCD_P, &lcdControllerNC_Handle, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(alarmControllerC, NULL, 4096, NULL, ALARM_P, &alarmControllerC_Handle, TASK_CORE_C);
 	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, APP_P, &appControllerNC_Handle, TASK_CORE_NC);
 		
