@@ -12,8 +12,9 @@ CONDITIONS OF ANY KIND, either express or implied.*
 
 
 # TODO:
-get specific model for Itempurature and etempuratrue drivers
+get specific model for Itempurature drivers
 get model for photonic thing, then make driver and logic
+decide which etempurature to use, DHT11 has temp, so does motion sensor, and we have the thermistor
 
 confirm led/lcd setup and update logic
 get alarm model and create driver
