@@ -9,3 +9,12 @@ Please check [ESP-IDF docs](https://docs.espressif.com/projects/esp-idf/en/lates
 Unless required by applicable law or agreed to in writing, this
 software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
 CONDITIONS OF ANY KIND, either express or implied.*
+
+
+# TODO:
+get specific model for Itempurature and etempuratrue drivers
+humidity driver and logic
+
+confirm led/lcd setup and update logic
+get alarm model and create driver
+figure out what we're doing with the app
