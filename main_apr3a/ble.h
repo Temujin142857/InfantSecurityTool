@@ -1,15 +1,10 @@
 #ifndef BLE_H
 #define BLE_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#define MESSAGE_LENGTH 8
+
 
 void ble_init(const char *device_name);
-void ble_update();
-
-#ifdef __cplusplus
-}
-#endif
+void ble_set_all_sensors(char id, float valf, int vali);
 
 #endif

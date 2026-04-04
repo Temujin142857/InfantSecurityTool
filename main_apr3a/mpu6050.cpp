@@ -23,10 +23,7 @@ void readMotion(float *motion){
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  float current = abs(a.acceleration.x) +
-                  abs(a.acceleration.y) +
-                  abs(a.acceleration.z);
-
+  float current = abs(a.acceleration.x) + abs(a.acceleration.y) + abs(a.acceleration.z);
   static float last = 0;
   float delta = abs(current - last);
   last = current;
