@@ -5,7 +5,7 @@
 DFRobot_MAX30102 particleSensor;
 
 void max30102_init(){
-   while (!particleSensor.begin()) {
+  while (!particleSensor.begin()) {
     Serial.println("MAX30102 was not found");
     delay(1000);
   }

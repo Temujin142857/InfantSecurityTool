@@ -61,7 +61,7 @@ typedef enum {
 } TaskPrioroties;
 
 const int tasksInPriorityOrder[NUM_TASKS]={UICONTROLLER_C, ALARM, LED_C, HEARTBEAT, SMOKE, ITEMPURATURE, MOTION, ERRHANDLER, ERRDECREMENTER, UICONTROLLER_NC, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
-const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000, 300, 100};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={20000, 15000, 30000, 40, 1000, 30000, 300};
 
 
 //Which core to pin the tasks to
@@ -276,17 +276,16 @@ void mq2Calibrate(void)
 
 //Monitoring tasks
 void eTempratureMonitorNC( void *pvParameters )
-{
-	
+{	
+		float tempTempurature=0;
     for( ;; )
     {
 		uint8_t errCount=0;
-		float tempTempurature=0;
+		
 		for(uint8_t i=0;i<3;i++){			
-			//read tempurature
-			//convert from k to c maybe
-			float t=0;
-			if(t<EXTERNAL_TEMPUTATURE_FLOOR||t>EXTERNAL_TEMPURATURE_CIEL){				
+			readTemperature(&tempTempurature);
+			printf("eTrmputature early: %f %%\n", tempTempurature);			
+			if(tempTempurature<EXTERNAL_TEMPUTATURE_FLOOR||tempTempurature>EXTERNAL_TEMPURATURE_CIEL){				
 				if(errCount>=3){
 					xSemaphoreGive(errFlagSignal);
 					errType[ETEMPURATURE]=1;
@@ -383,14 +382,14 @@ void heartbeatMonitorC(void *pvParameters)
 		}
   
 		readHeartRateAndBloodOxygen(&spo2, &spo2_valid, &heart_rate, &hr_valid);
-						
-  	if (hr_valid){
-			printf("Heart Rate: %li bpm\n", (long) heart_rate);
+		printf("Heart Rate early: %li bpm\n", (long) heart_rate);
+		printf("SpO2 early: %f %%\n", spo2);			
+
+  	if (hr_valid){			
 			heartbeat=heart_rate;
 			xSemaphoreGive(heartbeatLock);
   	} 
-  	if (spo2_valid){
- 	   	printf("SpO2: %f %%\n", spo2);
+  	if (spo2_valid){ 	   	
 			SO2Level=spo2;
 			xSemaphoreGive(SO2Lock);
  	 }   			
@@ -428,7 +427,7 @@ void smokeMonitorC( void *pvParameters )
 		sum=0;
 		for (int i=0; i<SMOKE_BATCH_SIZE; i++) {			
 			tempSmokeLevel_mv=read_smoke_raw();
-			printf("temp smoke level mv: %i", tempSmokeLevel_mv);
+			printf("temp smoke level early in mv: %i", tempSmokeLevel_mv);
 			if(tempSmokeLevel_mv >= SMOKE_CIEL_MV && tempSmokeLevel_mv <= SMOKE_FLOOR_MV){
 				errCount++;
 			} else{
@@ -458,8 +457,7 @@ void humidityMonitorNC( void *pvParameters )
     for( ;; )
     {
 		readHumidity(&tempHumidity);
-		printf("Humidity: %d\n", humidity);
-		
+		printf("Humidity early: %d\n", humidity);		
 		
 		if(tempHumidity>HUMIDITY_CIEL||tempHumidity<HUMIDITY_FLOOR){
 			errLocationTracker[HUMIDITY]=1;
@@ -469,8 +467,7 @@ void humidityMonitorNC( void *pvParameters )
 			humidity=tempHumidity;
 			xSemaphoreGive(humidityLock);
 			xQueueSend(UIControllerNC_Queue, (void *) HUMIDITY, 0);
-		}
-		
+		}		
 		
 		vTaskDelay(delayInMillisecondsForMonitorTasks[HUMIDITY]);
     }
@@ -486,7 +483,7 @@ void motionMonitorC( void *pvParameters )
 		xSemaphoreTake(I2CLock, portMAX_DELAY);
 		readMotion(&tempMotion);
 		xSemaphoreGive(I2CLock);	
-		
+		printf("motion early: %f %%\n", tempMotion);			
 		//we will have to calibrate
 		const float MOTION_THRESHOLD = 0.15f;
 		

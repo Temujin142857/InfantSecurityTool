@@ -3,5 +3,6 @@
 
 void dht_init();
 void readHumidity(float *h);
+void readTemperature(float *t);
 
 #endif
