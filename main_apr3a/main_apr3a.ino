@@ -1,4 +1,4 @@
-  // put your main code here, to run repeatedly:#include "freertos/FreeRTOS.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/projdefs.h"
 #include "portmacro.h"
@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <Wire.h>
-#include "mpu6050.h"
+#include "Mpu6050.h"
 #include "dht11.h"
 #include "max30102.h"
 #include "ble.h"
@@ -235,6 +235,7 @@ void errHandlerC(void *pvParameter){
 				}				
 			}
 		}	
+		taskYIELD();
 	}
 	vTaskDelete( NULL );
 }
@@ -294,6 +295,7 @@ void eTempratureMonitorNC( void *pvParameters )
 				}	
 				i--;
 				errCount++;
+				vTaskDelay(pdMS_TO_TICKS(10));
 			}
 			//add to tempTempurature
 		}		
@@ -328,9 +330,10 @@ void iTempratureMonitorC( void *pvParameters )
 					errType[1]=1;
 					tempTempurature=300;
 					break;
-				}	
+				}					
 			}
-			//add to tempTempurature
+			tempTempurature+=t;
+			vTaskDelay(pdMS_TO_TICKS(10));
 		}
 		if(tempTempurature==300){	
 			waitRecoveryC(1)	;	
@@ -433,6 +436,7 @@ void smokeMonitorC( void *pvParameters )
 			} else{
 				sum+=tempSmokeLevel_mv;
 			}
+			vTaskDelay(pdMS_TO_TICKS(10));
 		}
 		if(errCount>SMOKE_BATCH_SIZE/2){
 			errLocationTracker[SMOKE]=1;
@@ -622,6 +626,7 @@ void UIControllerC(void *pvParameter){
 				break;														
 		}
 		xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+		taskYIELD();
 	}
 }
 
@@ -662,6 +667,7 @@ void UIControllerNC(void *pvParameter){
 				break;												
 		}
 		xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+		taskYIELD();
 	}
 }
 
@@ -676,6 +682,7 @@ void ledControllerNC(void *pvParameter){
 	{
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		//gpio_toggle(LED_ORANGE);
+		taskYIELD();
 	}
 	vTaskDelete( NULL );
 }
@@ -688,6 +695,7 @@ void ledControllerC(void *pvParameter){
 	{
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		//gpio_toggle(LED_RED);
+		taskYIELD();
 	}
 	vTaskDelete( NULL );
 }
@@ -717,6 +725,7 @@ void alarmControllerC(void *pvParameter){
 	{
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 		//toggle=xQueueSemaphoreTake(alarmControllerC_Queue, portMAX_DELAY);
+		taskYIELD();
 	}
 	vTaskDelete( NULL );
 }
@@ -765,6 +774,7 @@ void appControllerNC(void *pvParameter){
 				ble_set_all_sensors('M', 0, tempMotion);
 				break;														
 		}
+		taskYIELD();
 
 	}
 	vTaskDelete( NULL );
@@ -775,13 +785,14 @@ void appControllerNC(void *pvParameter){
 void setup()
 {	
   Serial.begin(115200);
-  Wire.begin();
+  Wire.begin(21, 22);
 
 	//init sensors
 	I2CLock = xSemaphoreCreateMutex();
 	dht_init();
-	mpu_init();	
-	smoke_init();		
+	mpu_init(&Wire);	
+	smoke_init();	
+	max30102_init(&Wire);	
 
 	//init interfaceComponents
 	led_init();

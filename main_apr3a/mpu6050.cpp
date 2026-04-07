@@ -1,36 +1,30 @@
-#include "mpu6050.h"
+#include "Mpu6050.h"
 #include <Wire.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 
 Adafruit_MPU6050 mpu;
 
+void mpu_init(TwoWire *Wire) {
+  delay(100);
 
-float last = 0;
-
-
-void mpu_init(){
-  if (!mpu.begin()) {
+  if (!mpu.begin(0x68, Wire)) {
     Serial.println("Failed to find MPU6050 chip");
-    while (1) {
-      delay(10);
-    }
-  }
-  Serial.println("MPU6050 Found!");
+    
+  }else{
+    Serial.println("MPU6050 Found!");
+
+ }
 }
 
-void readMotion(float *motion){
+void readMotion(float *motion) {
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
 
-  float current = abs(a.acceleration.x) + abs(a.acceleration.y) + abs(a.acceleration.z);
+  float current = fabs(a.acceleration.x) + fabs(a.acceleration.y) + fabs(a.acceleration.z);
   static float last = 0;
-  float delta = abs(current - last);
+  float delta = fabs(current - last);
   last = current;
 
   *motion = delta;
 }
-
-
- 
-

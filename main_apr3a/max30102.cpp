@@ -1,36 +1,31 @@
 #include "max30102.h"
-#include <Wire.h>
-#include <MAX30105.h>
+#include <DFRobot_MAX30102.h>
 
-MAX30105 particleSensor;
+DFRobot_MAX30102 particleSensor;
 
-void max30102_init(TwoWire *wire) {
-  if (!particleSensor.begin(*wire, 400000, 0x57)) {
-    Serial.println("MAX30102 was not found. Please check wiring/power.");
-    
-  } else{
 
-  particleSensor.setup();
-  particleSensor.setPulseAmplitudeRed(0x1F);
-  particleSensor.setPulseAmplitudeIR(0x1F);
 
-  Serial.println("MAX30102 initialized");
+void max30102_init(TwoWire *Wire){
+  while (!particleSensor.begin()) {
+    Serial.println("MAX30102 was not found");
+    delay(1000);
+
   }
 
-
+   /*!
+   *@brief Use macro definition to configure sensor
+   *@param ledBrightness LED brightness, default value: 0x1F（6.4mA), Range: 0~255（0=Off, 255=50mA）
+   *@param sampleAverage Average multiple samples then draw once, reduce data throughput, default 4 samples average
+   *@param ledMode LED mode, default to use red light and IR at the same time 
+   *@param sampleRate Sampling rate, default 400 samples every second 
+   *@param pulseWidth Pulse width: the longer the pulse width, the wider the detection range. Default to be Max range
+   *@param adcRange Measurement Range, default 4096 (nA), 15.63(pA) per LSB
+   */
+  particleSensor.sensorConfiguration(/*ledBrightness=*/0x1F, /*sampleAverage=*/SAMPLEAVG_4, \
+                                  /*ledMode=*/MODE_MULTILED, /*sampleRate=*/SAMPLERATE_400, \
+                                  /*pulseWidth=*/PULSEWIDTH_411, /*adcRange=*/ADCRANGE_4096);
 }
 
-void readHeartRateAndBloodOxygen(int32_t *SPO2, int8_t *SPO2Valid, int32_t *heartRate, int8_t *heartRateValid) {
-  long irValue = particleSensor.getIR();
-  long redValue = particleSensor.getRed();
-
-  *heartRate = 0;
-  *heartRateValid = 0;
-  *SPO2 = 0;
-  *SPO2Valid = 0;
-
-  Serial.print("IR: ");
-  Serial.print(irValue);
-  Serial.print(" | RED: ");
-  Serial.println(redValue);
+void readHeartRateAndBloodOxygen(int32_t *SPO2,int8_t *SPO2Valid,int32_t *heartRate,int8_t *heartRateValid){
+  particleSensor.heartrateAndOxygenSaturation(SPO2,SPO2Valid,heartRate,heartRateValid);
 }
