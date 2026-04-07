@@ -830,15 +830,15 @@ void setup()
 	
 	//monitor tasks
 	xTaskCreatePinnedToCore(eTempratureMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 4096, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 8192, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, BRIGHTNESS_P, NULL, TASK_CORE_NC);
 	//note we put the heartbeat monitor and processing on the same core, 
 	//even though they will use a lot of the cpu time, because preventing them 
 	//from running in paralell helps avoid them accessing the same memory locations simultaneously
-	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 4096, NULL, HEARTBEAT_P, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(smokeMonitorC, NULL, 4096, NULL, SMOKE_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 8192, NULL, HEARTBEAT_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(smokeMonitorC, NULL, 8192, NULL, SMOKE_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, HUMIDITY_P, NULL, TASK_CORE_NC);	
-	xTaskCreatePinnedToCore(motionMonitorC, NULL, 4096, NULL, MOTION_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(motionMonitorC, NULL, 8192, NULL, MOTION_P, NULL, TASK_CORE_C);
 	
 	//ui tasks
 	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, LED_NC_P, &ledControllerNC_Handle, TASK_CORE_NC);
@@ -846,8 +846,8 @@ void setup()
 	//xTaskCreatePinnedToCore(lcdControllerNC, NULL, 4096, NULL, LCD_P, &lcdControllerNC_Handle, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(alarmControllerC, NULL, 4096, NULL, ALARM_P, &alarmControllerC_Handle, TASK_CORE_C);
 	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, APP_P, &appControllerNC_Handle, TASK_CORE_NC);
-	xTaskCreatePinnedToCore(UIControllerC, NULL, 4096, NULL, UICONTROLLER_C_P, NULL, TASK_CORE_C);
-	xTaskCreatePinnedToCore(UIControllerNC, NULL, 4096, NULL, UICONTROLLER_NC_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(UIControllerC, NULL, 8192, NULL, UICONTROLLER_C_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(UIControllerNC, NULL, 8192, NULL, UICONTROLLER_NC_P, NULL, TASK_CORE_NC);
 		
 }
 

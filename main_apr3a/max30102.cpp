@@ -6,13 +6,12 @@ DFRobot_MAX30102 particleSensor;
 
 
 void max30102_init(TwoWire *Wire){
-  while (!particleSensor.begin()) {
+  if(!particleSensor.begin()) {
     Serial.println("MAX30102 was not found");
     delay(1000);
 
-  }
-
-   /*!
+  }else {
+    /*!
    *@brief Use macro definition to configure sensor
    *@param ledBrightness LED brightness, default value: 0x1F（6.4mA), Range: 0~255（0=Off, 255=50mA）
    *@param sampleAverage Average multiple samples then draw once, reduce data throughput, default 4 samples average
@@ -24,6 +23,10 @@ void max30102_init(TwoWire *Wire){
   particleSensor.sensorConfiguration(/*ledBrightness=*/0x1F, /*sampleAverage=*/SAMPLEAVG_4, \
                                   /*ledMode=*/MODE_MULTILED, /*sampleRate=*/SAMPLERATE_400, \
                                   /*pulseWidth=*/PULSEWIDTH_411, /*adcRange=*/ADCRANGE_4096);
+
+  }
+
+   
 }
 
 void readHeartRateAndBloodOxygen(int32_t *SPO2,int8_t *SPO2Valid,int32_t *heartRate,int8_t *heartRateValid){
