@@ -1,9 +1,10 @@
 #ifndef MAX30102_H
 #define MAX30102_H
-#include <unistd.h>
 
-void max30102_init();
+#include <Wire.h>
+#include <stdint.h>
 
-void readHeartRateAndBloodOxygen(int32_t *SPO2,int8_t *SPO2Valid,int32_t *heartRate,int8_t *heartRateValid);
+void max30102_init(TwoWire *wire);
+void readHeartRateAndBloodOxygen(int32_t *spo2, int8_t *spo2_valid, int32_t *heart_rate, int8_t *hr_valid);
 
 #endif
