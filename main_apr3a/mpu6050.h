@@ -1,11 +1,10 @@
-#ifndef MPU60501_H
-#define MPU60501_H
+#ifndef MPU6050_H
+#define MPU6050_H
 
+#include <Arduino.h>
 #include <Wire.h>
 
-
 void mpu_init(TwoWire *wire);
-
 void readMotion(float *motion);
 
 #endif

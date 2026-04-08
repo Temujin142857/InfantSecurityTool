@@ -1,34 +1,99 @@
 #include "max30102.h"
-#include <DFRobot_MAX30102.h>
+#include <Wire.h>
+#include <MAX30105.h>
+#include "heartRate.h"
+#include "spo2_algorithm.h"
 
-DFRobot_MAX30102 particleSensor;
+MAX30105 particleSensor;
+static bool max_ready = false;
 
+// Buffers required for SpO2 algorithm
+#if defined(__AVR_ATmega328P__) || defined(__AVR_ATmega168__)
+uint16_t irBuffer[100];
+uint16_t redBuffer[100];
+#else
+uint32_t irBuffer[100];
+uint32_t redBuffer[100];
+#endif
 
+void max30102_init(TwoWire *wire) {
+    Serial.println("Initializing MAX30102...");
 
-void max30102_init(TwoWire *Wire){
-  if(!particleSensor.begin()) {
-    Serial.println("MAX30102 was not found");
-    delay(1000);
+    if (!particleSensor.begin(*wire, 400000, 0x57)) {
+        Serial.println("MAX30102 was not found. Check wiring.");
+        max_ready = false;
+        return;
+    }
 
-  }else {
-    /*!
-   *@brief Use macro definition to configure sensor
-   *@param ledBrightness LED brightness, default value: 0x1F（6.4mA), Range: 0~255（0=Off, 255=50mA）
-   *@param sampleAverage Average multiple samples then draw once, reduce data throughput, default 4 samples average
-   *@param ledMode LED mode, default to use red light and IR at the same time 
-   *@param sampleRate Sampling rate, default 400 samples every second 
-   *@param pulseWidth Pulse width: the longer the pulse width, the wider the detection range. Default to be Max range
-   *@param adcRange Measurement Range, default 4096 (nA), 15.63(pA) per LSB
-   */
-  particleSensor.sensorConfiguration(/*ledBrightness=*/0x1F, /*sampleAverage=*/SAMPLEAVG_4, \
-                                  /*ledMode=*/MODE_MULTILED, /*sampleRate=*/SAMPLERATE_400, \
-                                  /*pulseWidth=*/PULSEWIDTH_411, /*adcRange=*/ADCRANGE_4096);
+    byte ledBrightness = 60;   // un peu plus fort
+    byte sampleAverage = 4;
+    byte ledMode = 2;          // Red + IR
+    int sampleRate = 100;
+    int pulseWidth = 411;
+    int adcRange = 16384;
 
-  }
+    particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+    particleSensor.setPulseAmplitudeRed(0x24);
+    particleSensor.setPulseAmplitudeIR(0x24);
 
-   
+    Serial.println("MAX30102 initialized");
+    max_ready = true;
 }
 
-void readHeartRateAndBloodOxygen(int32_t *SPO2,int8_t *SPO2Valid,int32_t *heartRate,int8_t *heartRateValid){
-  particleSensor.heartrateAndOxygenSaturation(SPO2,SPO2Valid,heartRate,heartRateValid);
+void readHeartRateAndBloodOxygen(int32_t *spo2, int8_t *spo2_valid, int32_t *heart_rate, int8_t *hr_valid) {
+    if (!max_ready) {
+        Serial.println("MAX not ready");
+        *heart_rate = 0;
+        *hr_valid = 0;
+        *spo2 = 0;
+        *spo2_valid = 0;
+        return;
+    }
+
+    // collect 100 samples
+    for (int i = 0; i < 100; i++) {
+        while (particleSensor.available() == false) {
+            particleSensor.check();
+        }
+
+        redBuffer[i] = particleSensor.getRed();
+        irBuffer[i] = particleSensor.getIR();
+        particleSensor.nextSample();
+    }
+
+    Serial.print("IR sample: ");
+    Serial.print(irBuffer[99]);
+    Serial.print(" | RED sample: ");
+    Serial.println(redBuffer[99]);
+
+    // finger detection
+    if (irBuffer[99] < 5000) {
+        Serial.println("Place finger properly on sensor");
+        *heart_rate = 0;
+        *hr_valid = 0;
+        *spo2 = 0;
+        *spo2_valid = 0;
+        return;
+    }
+
+    // Use Maxim algorithm
+    maxim_heart_rate_and_oxygen_saturation(
+        irBuffer,
+        100,
+        redBuffer,
+        spo2,
+        spo2_valid,
+        heart_rate,
+        hr_valid
+    );
+
+    Serial.print("Heart Rate: ");
+    Serial.print(*heart_rate);
+    Serial.print(" | valid: ");
+    Serial.println(*hr_valid);
+
+    Serial.print("SpO2: ");
+    Serial.print(*spo2);
+    Serial.print(" | valid: ");
+    Serial.println(*spo2_valid);
 }
