@@ -1,6 +1,7 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLE2902.h>
 #include "ble.h"
 
 static BLECharacteristic *pAllSensorsChar;
@@ -34,6 +35,7 @@ void ble_init(const char *device_name) {
         ALL_SENSORS_UUID,
         BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
     );
+    pAllSensorsChar->addDescriptor(new BLE2902());
 
 /*
     pHeartRateChar = pService->createCharacteristic(HEART_RATE_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);

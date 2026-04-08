@@ -224,14 +224,14 @@ void errHandlerC(void *pvParameter){
 			if(errType[tasksInPriorityOrder[i]]>0){
 				errLocationTracker[tasksInPriorityOrder[i]]++;
 				//start a delay to decrement it
-				Serial.println("minor error: %i %%\n", i);
+				Serial.printf("minor error: %i %%\n", i);
 				xQueueSend(errToDecrementQueue, ( void * ) &tasksInPriorityOrder[i], 0);
 				xTaskCreatePinnedToCore(errDecrementerC, NULL, 4096, NULL, ERRDECREMENTER_P, NULL, TASK_CORE_C);
 				
 				if(errLocationTracker[tasksInPriorityOrder[i]]>=3){
 					//enter error state when it fails three times within a certain time frame
 					//revisit when logic for display and lights are more clear					
-					Serial.println("major error: %i %%\n", i);
+					Serial.printf("major error: %i %%\n", i);
 					//ble_set_all_sensors('U!', 0, 0);
 				} else{
 					xSemaphoreGive(recoverySignals[tasksInPriorityOrder[i]]);
@@ -290,7 +290,7 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 		for(uint8_t i=0;i<3;i++){			
 			readHumidity(&tempHumidity);
     	readTemperature(&tempTempurature);
-			Serial.println("eTrmputature early: %f %%\n", tempTempurature);			
+			Serial.printf("eTrmputature early: %f %%\n", tempTempurature);			
 			if(tempTempurature<EXTERNAL_TEMPUTATURE_FLOOR||tempTempurature>EXTERNAL_TEMPURATURE_CIEL){				
 				if(errCount>=3){
 					xSemaphoreGive(errFlagSignal);
@@ -311,7 +311,8 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 		xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
 		eTempurature=tempTempurature;
 		xSemaphoreGive(eTempuratureLock);
-		xQueueSend(UIControllerNC_Queue, (void *) ETEMPURATURE, 0);
+		int id=ETEMPURATURE;
+		xQueueSend(UIControllerNC_Queue, &id, 0);
 
 		if(tempHumidity>HUMIDITY_CIEL||tempHumidity<HUMIDITY_FLOOR){
 			errLocationTracker[HUMIDITY]=1;
@@ -320,7 +321,8 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 			xSemaphoreTake(humidityLock, portMAX_DELAY);
 			humidity=tempHumidity;
 			xSemaphoreGive(humidityLock);
-			xQueueSend(UIControllerNC_Queue, (void *) HUMIDITY, 0);
+			int id=HUMIDITY;
+			xQueueSend(UIControllerNC_Queue, &id, 0);
 		}		
 
 		vTaskDelay(delayInMillisecondsForMonitorTasks[ETEMPURATURE]);
@@ -362,7 +364,8 @@ void iTempratureMonitorC( void *pvParameters )
 		xSemaphoreTake(iTempuratureLock, portMAX_DELAY);
 		iTempurature=tempTempurature;
 		xSemaphoreGive(iTempuratureLock);
-		xQueueSend(UIControllerC_Queue, (void *) ITEMPURATURE, 0);
+		int id=ITEMPURATURE;
+		xQueueSend(UIControllerC_Queue, &id, 0);
 		vTaskDelay(delayInMillisecondsForMonitorTasks[ITEMPURATURE]);
     }
     vTaskDelete( NULL );
@@ -376,7 +379,8 @@ void brightnessMonitorNC( void *pvParameters )
 		xSemaphoreTake(brightnessLock, portMAX_DELAY);
 		brightness=10;
 		xSemaphoreGive(brightnessLock);
-		xQueueSend(UIControllerNC_Queue, (void *) BRIGHTNESS, 0);
+
+		//xQueueSend(UIControllerNC_Queue, (void *) BRIGHTNESS, 0);
 		vTaskDelay(delayInMillisecondsForMonitorTasks[BRIGHTNESS]);
     }
     vTaskDelete( NULL );
@@ -400,9 +404,9 @@ void heartbeatMonitorC(void *pvParameters)
 			awaitingErrProcessing = waitRecoveryC(HEARTBEAT);
 		}
   
-		readHeartRateAndBloodOxygen(&spo2, &spo2Valid, &heartRate, &hrValid);
-		Serial.println("Heart Rate early: %li bpm\n", (long) heart_rate);
-		Serial.println("SpO2 early: %f %%\n", spo2);			
+		readHeartRateAndBloodOxygen(&spo2, &spo2_valid, &heart_rate, &hr_valid);
+		Serial.printf("Heart Rate early: %li bpm\n", (long) heart_rate);
+		Serial.printf("SpO2 early: %f %%\n", spo2);			
 
   	if (hr_valid){			
 			heartbeat=heart_rate;
@@ -418,7 +422,8 @@ void heartbeatMonitorC(void *pvParameters)
 			awaitingErrProcessing=1;
 		}				
 		if(spo2_valid||hr_valid){
-			xQueueSend(UIControllerC_Queue, (void *) HEARTBEAT, 0);
+			int id = HEARTBEAT;
+			xQueueSend(UIControllerC_Queue, &id, 0);
 		}			
 		//this task requires extreme timing precision to properly calculate bpm, so we use delay until instead of delay
 		vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(delayInMillisecondsForMonitorTasks[HEARTBEAT]));
@@ -446,7 +451,7 @@ void smokeMonitorC( void *pvParameters )
 		sum=0;
 		for (int i=0; i<SMOKE_BATCH_SIZE; i++) {			
 			tempSmokeLevel_mv=read_smoke_raw();
-			Serial.println("temp smoke level early in mv: %i", tempSmokeLevel_mv);
+			Serial.printf("temp smoke level early in mv: %i", tempSmokeLevel_mv);
 			if(tempSmokeLevel_mv >= SMOKE_CIEL_MV && tempSmokeLevel_mv <= SMOKE_FLOOR_MV){
 				errCount++;
 			} else{
@@ -464,8 +469,8 @@ void smokeMonitorC( void *pvParameters )
 			smokeLevel=tempSmokeLevel_mv;
 			xSemaphoreGive(smokeLevelLock);
 		}
-		
-		xQueueSend(UIControllerC_Queue, (void *) SMOKE, 0);
+		int id=SMOKE;
+		xQueueSend(UIControllerC_Queue, &id, 0);
 		vTaskDelay(delayInMillisecondsForMonitorTasks[SMOKE]);
     }
     vTaskDelete( NULL );
@@ -478,7 +483,7 @@ void humidityMonitorNC( void *pvParameters )
     for( ;; )
     {
 		readHumidity(&tempHumidity);
-		Serial.println("Humidity early: %d\n", humidity);		
+		Serial.printf("Humidity early: %d\n", humidity);		
 		
 	
 		
@@ -498,7 +503,7 @@ void motionMonitorC( void *pvParameters )
 		xSemaphoreTake(I2CLock, portMAX_DELAY);
 		readMotion(&tempMotion);
 		xSemaphoreGive(I2CLock);	
-		Serial.println("motion early: %f %%\n", tempMotion);			
+		Serial.printf("motion early: %f %%\n", tempMotion);			
 		//we will have to calibrate
 		const float MOTION_THRESHOLD = 0.15f;
 		
@@ -514,7 +519,8 @@ void motionMonitorC( void *pvParameters )
 		xSemaphoreTake(motionLock, portMAX_DELAY);
 		timeSinceLastMotion = minutes;
 		xSemaphoreGive(motionLock);
-		xQueueSend(UIControllerC_Queue, (void *) MOTION, 0);
+		int id=MOTION;
+		xQueueSend(UIControllerC_Queue, &id, 0);
 		
 		vTaskDelay(delayInMillisecondsForMonitorTasks[MOTION]);
     }
@@ -599,12 +605,12 @@ void UIControllerC(void *pvParameter){
 	int id;
 	
 	for(;;){
-		id=xQueueSemaphoreTake(UIControllerC_Queue, portMAX_DELAY);
+		xQueueReceive(UIControllerC_Queue, &id, portMAX_DELAY);
 		switch (id){						
 			case ITEMPURATURE:
 				xSemaphoreTake(iTempuratureLock, portMAX_DELAY);
 				tempITempurature=iTempurature;
-				Serial.println("itempurature: %f \n", tempITempurature);
+				Serial.printf("itempurature: %f \n", tempITempurature);
 				xSemaphoreGive(iTempuratureLock);
 				if(iTempuratureCheck(tempITempurature)){
 									
@@ -618,25 +624,26 @@ void UIControllerC(void *pvParameter){
 				xSemaphoreTake(SO2Lock, portMAX_DELAY);
 				tempSO2Level=SO2Level;
 				xSemaphoreGive(SO2Lock);
-				Serial.println("heartbeat: %i \n", tempHeartbeat);
-				Serial.println("SO2: %i \n", tempSO2Level);
+				Serial.printf("heartbeat: %i \n", tempHeartbeat);
+				Serial.printf("SO2: %i \n", tempSO2Level);
 				break;	
 										
 			case SMOKE:
 				xSemaphoreTake(smokeLevelLock, portMAX_DELAY);
 				tempSmokeLevel=smokeLevel;
 				xSemaphoreGive(smokeLevelLock);
-				Serial.println("smoke level: %i \n", tempSmokeLevel);
+				Serial.printf("smoke level: %i \n", tempSmokeLevel);
 				break;	
 										
 			case MOTION:
 				xSemaphoreTake(motionLock, portMAX_DELAY);
 				tempMotion=timeSinceLastMotion;
 				xSemaphoreGive(motionLock);
-				Serial.println("time since last motion: %i \n", tempMotion);
+				Serial.printf("time since last motion: %i \n", tempMotion);
 				break;														
 		}
-		xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+		xTaskNotifyGive(appControllerNC_Handle);
+		xQueueSend(appControllerNC_Queue, &id, 0);
 		taskYIELD();
 	}
 }
@@ -648,7 +655,7 @@ void UIControllerNC(void *pvParameter){
 	int id;
 	
 	for(;;){
-		id=xQueueSemaphoreTake(UIControllerC_Queue, portMAX_DELAY);
+		xQueueReceive(UIControllerC_Queue, &id, portMAX_DELAY);
 		switch (id){
 			case ETEMPURATURE:
 				xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
@@ -657,7 +664,7 @@ void UIControllerNC(void *pvParameter){
 				//make an array of constants for each state the lights should be in
 				//and the message that should be displayed
 				//and for what should be sent to the app
-				Serial.println("etempurature: %f \n", tempETempurature);
+				Serial.printf("etempurature: %f \n", tempETempurature);
 				if(eTempuratureCheck(tempETempurature)==0){
 					//xTaskNotifyGive(ledControllerC_Handle);
 				}
@@ -667,17 +674,18 @@ void UIControllerNC(void *pvParameter){
 				xSemaphoreTake(brightnessLock, portMAX_DELAY);
 				tempBrightness=brightness;
 				xSemaphoreGive(brightnessLock);
-				Serial.println("brightness: %f \n", tempBrightness);
+				Serial.printf("brightness: %f \n", tempBrightness);
 				break;	
 										
 			case HUMIDITY:
 				xSemaphoreTake(humidityLock, portMAX_DELAY);
 				tempHumidity=humidity;
 				xSemaphoreGive(humidityLock);
-				Serial.println("humidity: %i \n", tempHumidity);
+				Serial.printf("humidity: %i \n", tempHumidity);
 				break;												
 		}
-		xQueueSend(appControllerNC_Queue, (void *) &id, 0);
+		xTaskNotifyGive(appControllerNC_Handle);
+		xQueueSend(appControllerNC_Queue, &id, 0);
 		taskYIELD();
 	}
 }
@@ -746,42 +754,42 @@ void appControllerNC(void *pvParameter){
 	for( ;; )
 	{
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-		monitorId=xQueueSemaphoreTake(appControllerNC_Queue, portMAX_DELAY);	
+		xQueueReceive(appControllerNC_Queue, &monitorId, portMAX_DELAY);	
 		switch (monitorId){
 			case ETEMPURATURE:
-				Serial.println("sending to ble etempurature: %f \n", tempETempurature);
+				Serial.printf("sending to ble etempurature: %f \n", tempETempurature);
 				ble_set_all_sensors('E', tempETempurature, 0);
 				break;
 						
 			case ITEMPURATURE:
-				Serial.println("sending to ble itempurature: %f \n", tempITempurature);
+				Serial.printf("sending to ble itempurature: %f \n", tempITempurature);
 				ble_set_all_sensors('I', tempITempurature, 0);
 				break;	
 						
 			case BRIGHTNESS:
-				Serial.println("sending to ble brightness: %f \n", tempBrightness);
+				Serial.printf("sending to ble brightness: %f \n", tempBrightness);
 				ble_set_all_sensors('B', 0, tempBrightness);
 				break;	
 						
 			case HEARTBEAT:
-				Serial.println("sending to ble heartbeat: %i \n", tempHeartbeat);
-				Serial.println("sending to ble SO2: %i \n", tempSO2Level);
+				Serial.printf("sending to ble heartbeat: %i \n", tempHeartbeat);
+				Serial.printf("sending to ble SO2: %i \n", tempSO2Level);
 				ble_set_all_sensors('C', 0, tempHeartbeat);
 				ble_set_all_sensors('O', 0, tempSO2Level);
 				break;	
 										
 			case SMOKE:
-				Serial.println("sending to ble smoke level: %i \n", tempSmokeLevel);
+				Serial.printf("sending to ble smoke level: %i \n", tempSmokeLevel);
 				ble_set_all_sensors('S', 0, tempSmokeLevel);
 				break;	
 						
 			case HUMIDITY:		
-				Serial.println("sending to ble humidity: %i \n", tempHumidity);		
+				Serial.printf("sending to ble humidity: %i \n", tempHumidity);		
 				ble_set_all_sensors('H', 0, tempHumidity);
 				break;
 										
 			case MOTION:
-				Serial.println("sending to ble time since last motion: %i \n", tempMotion);
+				Serial.printf("sending to ble time since last motion: %i \n", tempMotion);
 				ble_set_all_sensors('M', 0, tempMotion);
 				break;														
 		}
@@ -797,7 +805,7 @@ void setup()
 {	
   Serial.begin(115200);
 	delay(2000);
-  Serial.println("ESP32 start");
+  Serial.printf("ESP32 start");
   Wire.begin(21, 22);
 	delay(500);
 
@@ -842,17 +850,22 @@ void setup()
 	
 	xTaskCreatePinnedToCore(errHandlerC, NULL, 4096, NULL, ERRHANDLER_P, NULL, TASK_CORE_C);	
 	
+	Serial.printf("tasks start");
 	//monitor tasks
-	xTaskCreatePinnedToCore(eTempratureAndhumidityMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
+	xTaskCreatePinnedToCore(eTempratureAndHumidityMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
+	Serial.printf("temp and hum started");
 	//xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 8192, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
 	//xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, BRIGHTNESS_P, NULL, TASK_CORE_NC);
 	//note we put the heartbeat monitor and processing on the same core, 
 	//even though they will use a lot of the cpu time, because preventing them 
 	//from running in paralell helps avoid them accessing the same memory locations simultaneously
 	xTaskCreatePinnedToCore(heartbeatMonitorC, NULL, 8192, NULL, HEARTBEAT_P, NULL, TASK_CORE_C);
+	Serial.printf("heart Started");
 	xTaskCreatePinnedToCore(smokeMonitorC, NULL, 8192, NULL, SMOKE_P, NULL, TASK_CORE_C);
+	Serial.printf("smoke started");
 	//xTaskCreatePinnedToCore(humidityMonitorNC, NULL, 4096, NULL, HUMIDITY_P, NULL, TASK_CORE_NC);	
 	xTaskCreatePinnedToCore(motionMonitorC, NULL, 8192, NULL, MOTION_P, NULL, TASK_CORE_C);
+	Serial.printf("motion started\n");
 	
 	//ui tasks
 	xTaskCreatePinnedToCore(ledControllerNC, NULL, 4096, NULL, LED_NC_P, &ledControllerNC_Handle, TASK_CORE_NC);
@@ -862,6 +875,8 @@ void setup()
 	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, APP_P, &appControllerNC_Handle, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(UIControllerC, NULL, 8192, NULL, UICONTROLLER_C_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(UIControllerNC, NULL, 8192, NULL, UICONTROLLER_NC_P, NULL, TASK_CORE_NC);
+	Serial.printf("ui started\n");
+
 		
 }
 
