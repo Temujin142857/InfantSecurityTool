@@ -10,7 +10,7 @@
 #include "Mpu6050.h"
 #include "dht11.h"
 #include "max30102.h"
-#include "ble.h"
+#include "wifi.h"
 #include "mq2.h"
 #include "buzzer.h"
 #include "led.h"
@@ -757,40 +757,40 @@ void appControllerNC(void *pvParameter){
 		xQueueReceive(appControllerNC_Queue, &monitorId, portMAX_DELAY);	
 		switch (monitorId){
 			case ETEMPURATURE:
-				Serial.printf("sending to ble etempurature: %f \n", tempETempurature);
-				ble_set_all_sensors('E', tempETempurature, 0);
+				Serial.printf("sending to wifi etempurature: %f \n", tempETempurature);
+				wifi_send_sensor('E', tempETempurature, 0);
 				break;
 						
 			case ITEMPURATURE:
-				Serial.printf("sending to ble itempurature: %f \n", tempITempurature);
-				ble_set_all_sensors('I', tempITempurature, 0);
+				Serial.printf("sending to wifi itempurature: %f \n", tempITempurature);
+				wifi_send_sensor('I', tempITempurature, 0);
 				break;	
 						
 			case BRIGHTNESS:
-				Serial.printf("sending to ble brightness: %f \n", tempBrightness);
-				ble_set_all_sensors('B', 0, tempBrightness);
+				Serial.printf("sending to wifi brightness: %f \n", tempBrightness);
+				wifi_send_sensor('B', 0, tempBrightness);
 				break;	
 						
 			case HEARTBEAT:
-				Serial.printf("sending to ble heartbeat: %i \n", tempHeartbeat);
-				Serial.printf("sending to ble SO2: %i \n", tempSO2Level);
-				ble_set_all_sensors('C', 0, tempHeartbeat);
-				ble_set_all_sensors('O', 0, tempSO2Level);
+				Serial.printf("sending to wifi heartbeat: %i \n", tempHeartbeat);
+				Serial.printf("sending to wifi SO2: %i \n", tempSO2Level);
+				wifi_send_sensor('C', 0, tempHeartbeat);
+				wifi_send_sensor('O', 0, tempSO2Level);
 				break;	
 										
 			case SMOKE:
-				Serial.printf("sending to ble smoke level: %i \n", tempSmokeLevel);
-				ble_set_all_sensors('S', 0, tempSmokeLevel);
+				Serial.printf("sending to wifi smoke level: %i \n", tempSmokeLevel);
+				wifi_send_sensor('S', 0, tempSmokeLevel);
 				break;	
 						
 			case HUMIDITY:		
-				Serial.printf("sending to ble humidity: %i \n", tempHumidity);		
-				ble_set_all_sensors('H', 0, tempHumidity);
+				Serial.printf("sending to wifi humidity: %i \n", tempHumidity);
+				wifi_send_sensor('H', 0, tempHumidity);
 				break;
 										
 			case MOTION:
-				Serial.printf("sending to ble time since last motion: %i \n", tempMotion);
-				ble_set_all_sensors('M', 0, tempMotion);
+				Serial.printf("sending to wifi time since last motion: %i \n", tempMotion);
+				wifi_send_sensor('M', 0, tempMotion);
 				break;														
 		}
 		taskYIELD();
@@ -819,7 +819,7 @@ void setup()
 	//init interfaceComponents
 	led_init();
 	buzzer_init();
-	ble_init("InfantMonitor");
+	wifi_init();
 	
 	//init semaphores
 	//monitor semaphores
@@ -879,6 +879,6 @@ void setup()
 }
 
 void loop(){
-	checkToReconnect();
+	// WiFi reconnection is handled internally in the wifi module
 }
 
