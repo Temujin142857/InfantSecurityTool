@@ -13,6 +13,10 @@ static BLECharacteristic *pSpO2Char;
 static BLECharacteristic *pMotionChar;
 static BLECharacteristic *pHumidityChar;
 static BLECharacteristic *pBrightnessChar;
+static BLEServer *pServer = nullptr;
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
 
 # define ALL_SENSORS_UUID "10b80e40-fb4c-454a-ba7c-0cc397825fbb"
 
@@ -26,10 +30,21 @@ static BLECharacteristic *pBrightnessChar;
 #define HUMIDITY_UUID       "12de0149-ee0a-45dd-9db6-167d50929828"
 #define BRIGHTNESS_UUID     "9a737158-b0fc-4845-84e3-5a40afd05751"
 
+class MyServerCallbacks : public BLEServerCallbacks {
+      void onConnect(BLEServer* pServer) {
+          deviceConnected = true;
+          Serial.println("BLE client connected");
+      }
+      void onDisconnect(BLEServer* pServer) {
+          deviceConnected = false;
+      }
+  };
+  
 void ble_init(const char *device_name) {
     BLEDevice::init(device_name);
-    BLEServer *pServer = BLEDevice::createServer();
+    pServer = BLEDevice::createServer();
     BLEService *pService = pServer->createService(SERVICE_UUID);
+    pServer->setCallbacks(new MyServerCallbacks());
 
     pAllSensorsChar = pService->createCharacteristic(
         ALL_SENSORS_UUID,
@@ -54,12 +69,33 @@ void ble_init(const char *device_name) {
 }
 
 void ble_set_all_sensors(char id, float valf, int vali) {
-    char buffer[MESSAGE_LENGTH]; // plan is to only use 7 chars, 8 just in case
-    if(id=='E'||id=='I'){
-        sprintf(buffer, "%c!%.2f", id, valf);
-    } else {
-        sprintf(buffer, "%c!%5d", id, vali);
-    }
-    pAllSensorsChar->setValue(buffer);    
-    pAllSensorsChar->notify();
+      if (pServer == nullptr || pServer->getConnectedCount() == 0) return;
+
+      char buffer[MESSAGE_LENGTH];
+      if(id=='E'||id=='I'){
+          sprintf(buffer, "%c!%.2f", id, valf);
+      } else {
+          sprintf(buffer, "%c!%5d", id, vali);
+      }
+      pAllSensorsChar->setValue(buffer);
+      pAllSensorsChar->notify();
+  }
+
+void checkToReconnect() //added
+{
+  // disconnected so advertise
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500); // give the bluetooth stack the chance to get things ready
+    pServer->startAdvertising(); // restart advertising
+    Serial.println("Disconnected: start advertising");
+    oldDeviceConnected = deviceConnected;
+  }
+  // connected so reset boolean control
+  if (deviceConnected && !oldDeviceConnected) {
+    // do stuff here on connecting
+    Serial.println("Reconnected");
+    oldDeviceConnected = deviceConnected;
+  }
 }
+
+

@@ -655,7 +655,7 @@ void UIControllerNC(void *pvParameter){
 	int id;
 	
 	for(;;){
-		xQueueReceive(UIControllerC_Queue, &id, portMAX_DELAY);
+		xQueueReceive(UIControllerNC_Queue, &id, portMAX_DELAY);
 		switch (id){
 			case ETEMPURATURE:
 				xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
@@ -875,10 +875,10 @@ void setup()
 	xTaskCreatePinnedToCore(appControllerNC, NULL, 4096, NULL, APP_P, &appControllerNC_Handle, TASK_CORE_NC);
 	xTaskCreatePinnedToCore(UIControllerC, NULL, 8192, NULL, UICONTROLLER_C_P, NULL, TASK_CORE_C);
 	xTaskCreatePinnedToCore(UIControllerNC, NULL, 8192, NULL, UICONTROLLER_NC_P, NULL, TASK_CORE_NC);
-	Serial.printf("ui started\n");
-
-		
+	Serial.printf("ui started\n");		
 }
 
-void loop(){}
+void loop(){
+	checkToReconnect();
+}
 
