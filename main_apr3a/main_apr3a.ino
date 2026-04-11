@@ -61,7 +61,7 @@ typedef enum {
 } TaskPrioroties;
 
 const int tasksInPriorityOrder[NUM_TASKS]={UICONTROLLER_C, ALARM, LED_C, HEARTBEAT, SMOKE, ITEMPURATURE, MOTION, ERRHANDLER, ERRDECREMENTER, UICONTROLLER_NC, APP, ETEMPURATURE, LCD, LED_NC, HUMIDITY, BRIGHTNESS};
-const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={1000, 1000, 1000, 40, 1000, 1000, 300};
+const uint32_t delayInMillisecondsForMonitorTasks[NUM_MONITORS]={1000, 1000, 1000, 40, 1000, 1000, 100};
 
 
 //Which core to pin the tasks to
@@ -283,14 +283,17 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 {	
 		float tempHumidity;
 		float tempTempurature=0;
+		float eTempSum;
     for( ;; )
     {
 		uint8_t errCount=0;
+		eTempSum=0;
 		
 		for(uint8_t i=0;i<3;i++){			
 			readHumidity(&tempHumidity);
     	readTemperature(&tempTempurature);
-			Serial.printf("eTrmputature early: %f %%\n", tempTempurature);			
+			Serial.printf("eTrmputature early: %f %\n", tempTempurature);	
+			Serial.printf("humidity early: %f %\n", tempHumidity);	
 			if(tempTempurature<EXTERNAL_TEMPUTATURE_FLOOR||tempTempurature>EXTERNAL_TEMPURATURE_CIEL){				
 				if(errCount>=3){
 					xSemaphoreGive(errFlagSignal);
@@ -298,17 +301,24 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 					waitRecoveryNC(ETEMPURATURE);
 					break;
 				}	
-				i--;
 				errCount++;
 				vTaskDelay(pdMS_TO_TICKS(10));
 			}
-			//add to tempTempurature
+			eTempSum+=tempTempurature;
 		}		
-		tempTempurature=tempTempurature/3;		
+		
+		xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
+		if(errCount<=3){
+
+		tempTempurature=eTempSum/(3-errCount);		
+		}
+		else {tempTempurature=eTempurature;}
 		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
 		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
 		}
-		xSemaphoreTake(eTempuratureLock, portMAX_DELAY);
+		
+		Serial.printf("eTrmputature earlyish: %f %\n", tempTempurature);	
+		Serial.printf("humidity earlyish: %f %\n", tempHumidity);	
 		eTempurature=tempTempurature;
 		xSemaphoreGive(eTempuratureLock);
 		int id=ETEMPURATURE;
@@ -505,7 +515,7 @@ void motionMonitorC( void *pvParameters )
 		xSemaphoreGive(I2CLock);	
 		Serial.printf("motion early: %f %%\n", tempMotion);			
 		//we will have to calibrate
-		const float MOTION_THRESHOLD = 0.15f;
+		const float MOTION_THRESHOLD = 5;
 		
 		if (tempMotion > MOTION_THRESHOLD){
 			// Movement detected → reset timer
