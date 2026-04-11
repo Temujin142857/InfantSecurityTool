@@ -42,10 +42,18 @@ void readMotion(float *motion) {
 
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
+    
+	Serial.printf("x early: %f %\n", a.acceleration.x );	
+    Serial.printf("y early: %f %\n", a.acceleration.y );
+    Serial.printf("z early: %f %\n", a.acceleration.z );
+    float z=a.acceleration.z+10.8;
+    float y=a.acceleration.y+0.1;
+    float x=a.acceleration.x-1.5;
+
 
     *motion = sqrt(
-        a.acceleration.x * a.acceleration.x +
-        a.acceleration.y * a.acceleration.y +
-        a.acceleration.z * a.acceleration.z
+        x * x +
+        y * y +
+        z * z
     );
 }

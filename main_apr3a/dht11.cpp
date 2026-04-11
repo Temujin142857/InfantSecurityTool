@@ -11,8 +11,10 @@ void dht_init(){
 
 void readHumidity(float *h){
   *h = dht.readHumidity();
+  *h=*h+25;
 }
 
 void readTemperature(float *t){
   *t = dht.readTemperature();
+  *t=*t;
 }
