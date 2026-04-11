@@ -5,8 +5,8 @@
 #include "wifi.h"
 
 // ── PLACEHOLDER CREDENTIALS — replace before flashing ─────────────────────────
-#define WIFI_SSID     "YOUR_SSID_HERE"       // <-- replace
-#define WIFI_PASSWORD "YOUR_PASSWORD_HERE"   // <-- replace
+#define WIFI_SSID     "iPhone Yann"       // <-- connection to connection sharing of Yann iPhone
+#define WIFI_PASSWORD "Yann3003"   // <-- password :/
 // ─────────────────────────────────────────────────────────────────────────────
 
 #define SLOT_SIZE 9   // MESSAGE_LENGTH (8) + null terminator
