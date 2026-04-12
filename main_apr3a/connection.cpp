@@ -1,8 +1,8 @@
-#include <WiFi.h>
+#include "connection.h"
+#include <WiFi.h>        
 #include <WebServer.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "wifi.h"
 
 // ── PLACEHOLDER CREDENTIALS — replace before flashing ─────────────────────────
 #define WIFI_SSID     "iPhone Yann"       // <-- connection to connection sharing of Yann iPhone

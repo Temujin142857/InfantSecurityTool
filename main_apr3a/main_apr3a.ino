@@ -10,7 +10,7 @@
 #include "Mpu6050.h"
 #include "dht11.h"
 #include "max30102.h"
-#include "wifi.h"
+#include "connection.h"
 #include "mq2.h"
 #include "buzzer.h"
 #include "led.h"
