@@ -14,6 +14,7 @@
 #include "mq2.h"
 #include "buzzer.h"
 #include "led.h"
+#include "thermistor.h"
 
 
 #define NUM_TASKS 17
@@ -342,32 +343,39 @@ void eTempratureAndHumidityMonitorNC( void *pvParameters )
 
 void iTempratureMonitorC( void *pvParameters )
 {
-	uint8_t errCount=0;
+	uint8_t errCount=0;	
+	uint8_t awaitingErrProcessing=0;
+	float tempTempurature=0;
+	float t;
     for( ;; )
     {
-		float tempTempurature=0;
+		if(awaitingErrProcessing){
+			awaitingErrProcessing = waitRecoveryC(HEARTBEAT);
+		}
+		tempTempurature=0;
+		t=0;
 		for(uint8_t i=0;i<3;i++){
 			//read tempurature
 			//convert from k to c maybe
-			float t=0;
+			readITempurature(*t);
 			if(t<INTERNAL_TEMPURATURE_FLOOR||t>INTERNAL_TEMPURATURE_CIEL){
 				i--;
 				errCount++;
 				if(errCount>3){
 					xSemaphoreGive(errFlagSignal);
 					errType[1]=1;
-					tempTempurature=300;
+					awaitingErrProcessing=1;
 					break;
 				}					
+			}else {
+				tempTempurature+=t;
 			}
-			tempTempurature+=t;
 			vTaskDelay(pdMS_TO_TICKS(10));
 		}
-		if(tempTempurature==300){	
-			waitRecoveryC(1)	;	
+		if(errCount<=3){
+			tempTempurature=t/(3-errCount);		
 		}
-		
-		tempTempurature=tempTempurature/3;		
+		else {tempTempurature=iTempurature;}	
 		if(tempTempurature>EXTERNAL_TEMPURATURE_MAX){
 		} else if (tempTempurature<EXTERNAL_TEMPURATURE_MIN){
 		}
