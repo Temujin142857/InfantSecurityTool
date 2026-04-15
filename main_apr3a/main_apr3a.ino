@@ -425,13 +425,12 @@ void heartbeatMonitorC(void *pvParameters)
 		readHeartRateAndBloodOxygen(&spo2, &spo2_valid, &heart_rate, &hr_valid);
 		Serial.printf("Heart Rate early: %li bpm\n", (long) heart_rate);
 		Serial.printf("SpO2 early: %f %%\n", spo2);			
-
   	if (hr_valid){			
-			heartbeat=heart_rate;
+			heartbeat=heart_rate-20;
 			xSemaphoreGive(heartbeatLock);
   	} 
   	if (spo2_valid){ 	   	
-			SO2Level=spo2;
+			SO2Level=spo2-1;
 			xSemaphoreGive(SO2Lock);
  	 }   			
 		if(!spo2_valid||!hr_valid){		
