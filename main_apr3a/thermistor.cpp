@@ -1,4 +1,5 @@
 #include "thermistor.h"
+#include <math.h>
 
 #define THERMISTOR_PIN 34   // GPIO34 (ADC1, safe pin)
 #define SERIES_RESISTOR 10000  // 10k resistor

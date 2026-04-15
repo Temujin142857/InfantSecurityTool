@@ -357,7 +357,7 @@ void iTempratureMonitorC( void *pvParameters )
 		for(uint8_t i=0;i<3;i++){
 			//read tempurature
 			//convert from k to c maybe
-			readITempurature(*t);
+			readITempurature(&t);
 			if(t<INTERNAL_TEMPURATURE_FLOOR||t>INTERNAL_TEMPURATURE_CIEL){
 				i--;
 				errCount++;
