@@ -359,6 +359,7 @@ void iTempratureMonitorC( void *pvParameters )
 			//convert from k to c maybe
 			readITempurature(&t);
 			if(t<INTERNAL_TEMPURATURE_FLOOR||t>INTERNAL_TEMPURATURE_CIEL){
+				Serial.printf("iTrmputature earlyish: %f %\n", t);
 				i--;
 				errCount++;
 				if(errCount>3){
@@ -826,6 +827,11 @@ void setup()
   Wire.begin(21, 22);
 	delay(500);
 
+	//init interfaceComponents
+	led_init();
+	buzzer_init();
+	wifi_init();
+	
 	//init sensors
 	I2CLock = xSemaphoreCreateMutex();
 	dht_init();
@@ -833,10 +839,7 @@ void setup()
 	smoke_init();	
 	max30102_init(&Wire);	
 
-	//init interfaceComponents
-	led_init();
-	buzzer_init();
-	wifi_init();
+	
 	
 	//init semaphores
 	//monitor semaphores
@@ -871,7 +874,8 @@ void setup()
 	//monitor tasks
 	xTaskCreatePinnedToCore(eTempratureAndHumidityMonitorNC, NULL, 4096, NULL, ETEMPURATURE_P, NULL, TASK_CORE_NC);
 	Serial.printf("temp and hum started");
-	//xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 8192, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
+	xTaskCreatePinnedToCore(iTempratureMonitorC, NULL, 8192, NULL, ITEMPURATURE_P, NULL, TASK_CORE_C);
+	Serial.printf("itemp started");
 	//xTaskCreatePinnedToCore(brightnessMonitorNC, NULL, 4096, NULL, BRIGHTNESS_P, NULL, TASK_CORE_NC);
 	//note we put the heartbeat monitor and processing on the same core, 
 	//even though they will use a lot of the cpu time, because preventing them 
